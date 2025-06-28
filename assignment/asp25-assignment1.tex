@@ -13,6 +13,14 @@
 \usepackage{fontspec}
 \setmainfont[]{Open Sans}
 
+\newfontfamily\adventurefont{Adventure}
+
+\newcommand{\HUGE}{\fontsize{30pt}{36pt}\selectfont}
+
+\newcommand{\adventuresection}[1]{%
+    \section*{\centering\HUGE\adventurefont #1}%
+}
+
 \usepackage{minted}
 \usemintedstyle{friendly}
 
@@ -68,14 +76,24 @@ Do not open pull requests to the original repository unless asked to do so.
 \textbf{Getting help:} If you encounter technical issues you cannot resolve after reasonable effort, contact course staff.
 Learning when to seek help (and when not to) is part of the assignment.
 
+\vfill
+
+\begin{center}
+    \includegraphics[width=200px]{assets/snake}
+\end{center}
+
 \clearpage
 \setcounter{page}{1}
 
-\section*{Introduction}
+\adventuresection{introduction}
+\vspace{-1em}
+\begin{center}
+    \includegraphics[width=\textwidth]{assets/hr-fancy}
+\end{center}
 
-\begin{wrapfigure}[4]{l}{64px}
-    \vspace{-1.6em}
-    \includegraphics[width=64px]{assets/console}
+\begin{wrapfigure}[5]{l}{64pt}
+    \vspace{-1em}
+    \includegraphics[width=64pt]{assets/console}
 \end{wrapfigure}
 
 \textbf{Welcome to Advanced Systems Programming 2025!}
@@ -105,7 +123,11 @@ You'll learn not just how real-world systems work, but why they're designed the 
 \end{itemize}
 
 \clearpage
-\section*{Getting Started: Setting Up the Project}
+\adventuresection{getting started: setting up the project}
+\vspace{-1em}
+\begin{center}
+    \includegraphics[width=\textwidth]{assets/hr2}
+\end{center}
 
 \textbf{Repository setup:}
 \vspace{-1em}
@@ -115,28 +137,30 @@ You'll learn not just how real-world systems work, but why they're designed the 
           Do not open any pull requests to the original repository
     \item Clone your forked repository to your local machine
     \item Refer to the \texttt{README.md} file in the root directory of the repository for detailed setup instructions, usage examples, and project overview.
-          It contains comprehensive information about the project structure, commands, and development workflow.
+          It contains comprehensive information about the project structure, commands, and development workflow
 \end{enumerate}
 
 Next, we will delve into the codebase and its accompanying files, charting the layout and tracing the flow of information throughout the system.
 In the sections ahead, we will uncover the remnants of past decisions, examine the directory structure, and outline the boundaries of each module.
 Picture it as exploring an ancient ruin, uncovering its secrets one directory at a time.
+
 \begin{center}
-    \href{https://github.com/your-org/caf-project}{
-        \includegraphics[width=0.5\textwidth]{assets/git-temple}
-    }
+    \includegraphics[width=0.5\textwidth]{assets/git-temple}
 \end{center}
 
 \clearpage
-\section*{Task 1: Exploring the Codebase}
+\adventuresection{task 1: exploring the codebase}
+\vspace{-1em}
+\begin{center}
+    \includegraphics[width=\textwidth]{assets/hr1}
+\end{center}
 
-\begin{wrapfigure}[4]{l}{54px}
-    \vspace{-1.4em}
+\begin{wrapfigure}[6]{l}{54px}
     \includegraphics[width=54px]{assets/spyglass}
 \end{wrapfigure}
 
-In this section, you will develop your ability to analyze, synthesize, and communicate technical information by mapping the landscape of the project.
-You will create a comprehensive list of all significant files and directories, and for each, provide a thoughtful analysis of its purpose, role, and relationships within the project.
+In this section, you will develop your ability to analyze, synthesize, and communicate technical information by exploring the project.
+Create a comprehensive list of all significant files and directories, and for each, provide a thoughtful analysis of its purpose, role, and relationships within the project.
 This will lay the foundation for deeper exploration in the sections ahead.
 
 \textbf{Objective:} Create a comprehensive catalog of the project's structure and understand each component's role.
@@ -195,11 +219,15 @@ Your insights here will lay the foundation for deeper exploration in the section
 
 
 \clearpage
-\section*{Task 2: Mapping the Codebase}
+\adventuresection{task 2: mapping the codebase}
+\vspace{-1em}
+\begin{center}
+    \includegraphics[width=\textwidth]{assets/hr3}
+\end{center}
 
-\begin{wrapfigure}[4]{l}{54px}
-    \vspace{-1.6em}
-    \includegraphics[width=54px]{assets/map}
+\begin{wrapfigure}[5]{l}{64px}
+    \vspace{-1em}
+    \includegraphics[width=64px]{assets/map}
 \end{wrapfigure}
 
 In this section, you will build a mental model of the project as a system.
@@ -230,6 +258,7 @@ This will help you see how the pieces fit together and make you more effective i
     \item \textbf{Error Handling:} How errors propagate through the system
 \end{itemize}
 
+\clearpage
 \textbf{Diagram requirements:}
 \vspace{-1em}
 \begin{itemize}
@@ -253,18 +282,22 @@ This is a crucial skill in programming, as it allows you to see how different pa
 The more clearly you can see how the pieces fit together, the more effective you will be in extending and maintaining the codebase.
 
 \clearpage
-\section*{Task 3: Bringing the Project to Life}
+\adventuresection{task 3: bringing the project to life}
+\vspace{-1em}
+\begin{center}
+    \includegraphics[width=\textwidth]{assets/hr2}
+\end{center}
 
-\begin{wrapfigure}[4]{l}{64px}
-    \vspace{-1.6em}
+\begin{wrapfigure}[5]{l}{64px}
+    \vspace{-1.2em}
     \includegraphics[width=64px]{assets/rocket}
 \end{wrapfigure}
 
-Now that you have explored the codebase and mapped its structure, your next step is to get the project running on your own machine and run the test suite to verify your setup
-In this section, you will set up and launch the development environment using Docker, which simplifies the setup of a consistent development environment.
+Now that you have explored the codebase and mapped its structure, your next step is to get the project running on your own machine.
+We use Docker, which simplifies the setup of a consistent development environment.
 This ensures you can bring the project to life and begin experimenting with it.
 
-\textbf{Objective:} Successfully set up the development environment and establish a baseline understanding of the project's current state.
+\textbf{Objective:} Set up the development environment and run the test suite.
 
 \textbf{Setup steps:}
 \vspace{-1em}
@@ -279,7 +312,6 @@ This ensures you can bring the project to life and begin experimenting with it.
 See the project \texttt{Makefile} for commands to execute outside and inside the container.
 If you encounter issues you cannot resolve, contact the course staff for help.
 Part of the assignment is learning to how to solve problems yourself, and also when to seek assistance.
-Briefly describe any issues you encountered and how you resolved them (or what help you needed).
 
 \textbf{Testing the application:}
 \vspace{-1em}
@@ -292,18 +324,21 @@ Briefly describe any issues you encountered and how you resolved them (or what h
 \textbf{Deliverable:} None.
 
 \clearpage
-\section*{Task 4: Debugging and Fixing Failing Tests}
+\adventuresection{task 4: debugging and fixing failing tests}
+\vspace{-1em}
+\begin{center}
+    \includegraphics[width=\textwidth]{assets/hr1}
+\end{center}
 
-% \begin{wrapfigure}[4]{l}{54px}
-%     \vspace{-1.6em}
-%     \includegraphics[width=54px]{assets/bug.png}
-% \end{wrapfigure}
+\begin{wrapfigure}[6]{l}{70px}
+    \vspace{-1em}
+    \includegraphics[width=70px]{assets/bug}
+\end{wrapfigure}
 
 In this section, you will develop your debugging and problem-solving skills.
-Once you have run the test suite, you may find that some tests do not pass.
-You will learn to identify, analyze, and fix issues in the codebase that cause tests to fail.
-Your next task is to investigate these failing tests, understand the reasons behind their failure, and fix the underlying issues in the project code (not by changing or turning off the tests themselves).
-Focus on understanding the intent of the code and the tests, and on making thoughtful, minimal changes to correct the underlying issues.
+Once you have run the test suite, you will find that some tests don't pass.
+Investigate these failing tests, understand the reasons behind their failure, and fix the underlying issues.
+Focus on understanding the intent of the code and tests, and make thoughtful, minimal changes.
 
 \textbf{Objective:} Develop systematic debugging skills and fix code issues that cause test failures.
 
@@ -318,7 +353,7 @@ Focus on understanding the intent of the code and the tests, and on making thoug
     \item \textbf{Verify:} Re-run tests to confirm the fix
 \end{enumerate}
 
-\textbf{Understanding the Failing Tests:}
+\textbf{Understanding the failing tests:}
 
 When you run the test suite, you will encounter two kinds of failing tests.
 Understanding why each test fails is crucial to developing effective debugging skills:
@@ -348,8 +383,6 @@ Understanding why each test fails is crucial to developing effective debugging s
     \item Add print statements to trace execution
     \item Use the Python debugger (\texttt{pdb}), PyCharm, VS Code, etc
     \item Verify assumptions about data structures and types
-    \item If you are unable to fix a test, describe what you tried and where you got stuck.
-          This will help the course staff assist you
 \end{itemize}
 
 \textbf{Deliverable:}
@@ -365,16 +398,20 @@ For each fix you made:
 \end{itemize}
 
 \clearpage
-\section*{Task 5: Implementing a Tagging Feature}
+\adventuresection{task 5: implementing a tagging feature}
+\vspace{-1em}
+\begin{center}
+    \includegraphics[width=\textwidth]{assets/hr-git}
+\end{center}
 
-% \begin{wrapfigure}[4]{l}{54px}
-%     \vspace{-1.6em}
-%     \includegraphics[width=54px]{assets/tag.png}
-% \end{wrapfigure}
+\begin{wrapfigure}[6]{l}{64px}
+    \vspace{-1em}
+    \includegraphics[width=64px]{assets/tag}
+\end{wrapfigure}
 
 Your next challenge is to extend the CAF project by implementing a feature inspired by Git's tagging system.
 This will require you to research what a ``git tag'' is, understand its purpose and implementation, and then design and build a similar feature for the CAF project.
-Focus on making your implementation robust, well-documented, and consistent with the rest of the project.
+Focus on making your code robust, well-documented, and consistent with the rest of the project.
 
 \textbf{Objective:} Research, design, and implement a Git-style tagging system for the CAF project.
 
@@ -390,7 +427,7 @@ Research Git's tagging system and document:
 \textbf{Minimum implementation requirements:}
 \vspace{-1em}
 \begin{itemize}
-    \item \textbf{Data Model:} Tag objects/structures to represent tags
+    \item \textbf{Data model:} Tag objects/structures to represent tags
     \item \textbf{Storage:} File system representation (where/how tags are stored)
     \item \textbf{Operations:}
           \begin{itemize}
@@ -398,9 +435,9 @@ Research Git's tagging system and document:
               \item Create tag: \texttt{caf create\_tag <tagname> <commit-hash>}
               \item Delete tag: \texttt{caf delete\_tag <tagname>}
           \end{itemize}
-    \item \textbf{CLI Integration:} Add tag commands to existing CLI structure
+    \item \textbf{CLI integration:} Add tag commands to existing CLI structure
     \item \textbf{Tests:} Unit tests for tag operations and CLI functionality (separate logic and CLI tests)
-    \item \textbf{Error Handling:} Appropriate error messages for invalid operations
+    \item \textbf{Error handling:} Appropriate error messages for invalid operations
 \end{itemize}
 
 \textbf{Design considerations:}
@@ -437,7 +474,7 @@ Research Git's tagging system and document:
     \item Your branch or pull request should be clearly organized and easy to navigate
 \end{itemize}
 
-\section*{Grading}
+\adventuresection{GRADING}
 
 Your assignment will be evaluated on both absolute quality and relative performance.
 We assess the technical accuracy of your work, the clarity and depth of your explanations, and your adherence to assignment guidelines.
@@ -467,7 +504,7 @@ Points will be awarded for each task based on the following criteria:
 \end{center}
 
 \clearpage
-\section*{Submission Checklist}
+\adventuresection{SUBMISSION CHECKLIST}
 
 \textbf{Required deliverables:}
 \vspace{-1em}
@@ -492,7 +529,11 @@ Points will be awarded for each task based on the following criteria:
 \end{itemize}
 
 \clearpage
-\section*{Conclusion}
+\adventuresection{CONCLUSION}
+\vspace{-1em}
+\begin{center}
+    \includegraphics[width=\textwidth]{assets/hr-fancy}
+\end{center}
 
 You've now journeyed through the complete lifecycle of working with a real-world codebase: from initial exploration and understanding, through debugging and problem-solving, to extending the system with new functionality.
 

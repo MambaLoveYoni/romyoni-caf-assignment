@@ -545,9 +545,11 @@ class Repository:
                     parent_diff.children.append(local_diff)
 
         # Sort the diffs to ensure a deterministic order.
-        top_level_diff.children.sort(key=lambda d: d.record.name)
+        # top_level_diff.children.sort(key=lambda d: d.record.name)
 
         return top_level_diff.children
+
+        
 
     def head_file(self) -> Path:
         """Get the path to the HEAD file within the repository.
@@ -562,3 +564,5 @@ def branch_ref(branch: str) -> SymRef:
     :param branch: The name of the branch.
     :return: A SymRef object representing the branch reference."""
     return SymRef(f'{HEADS_DIR}/{branch}')
+
+

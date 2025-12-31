@@ -489,7 +489,9 @@ class Repository:
         save_commit(self.objects_dir(), commit)
 
         if branch:
-            self.update_ref(branch, commit_ref)
+            # Extract the relative path from the SymRef (e.g., 'heads/feature' from SymRef('heads/feature'))
+            ref_path = str(branch)
+            self.update_ref(ref_path, commit_ref)
 
         return commit_ref
 

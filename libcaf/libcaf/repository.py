@@ -651,13 +651,11 @@ class Repository:
     @requires_repo
     def common_ancestor(self, commit_ref1: Ref | None = None, commit_ref2: Ref | None = None) -> HashRef | None:
         """Find the common ancestor of two commits, if one exists."""
-        # 1. טיפול בערכי ברירת מחדל
         if commit_ref1 is None:
             commit_ref1 = self.head_ref()
         if commit_ref2 is None:
             commit_ref2 = self.head_ref()
 
-        # 2. המרת References ל-Hashes (החלק שחייב את self)
         try:
             commit_hash1 = self.resolve_ref(commit_ref1)
             commit_hash2 = self.resolve_ref(commit_ref2)
@@ -668,12 +666,9 @@ class Repository:
                 raise RefError(f'Cannot resolve reference {commit_ref2}')
                 
         except Exception as e:
-            # תופס גם שגיאות של resolve_ref וגם את ה-RefError שהעלינו למעלה
             msg = 'Error resolving commit references'
             raise RepositoryError(msg) from e
 
-        # 3. קריאה לפונקציה החיצונית (האלגוריתם הטהור)
-        # כאן אנחנו מעבירים רק את הנתיב (מחרוזת) ואת ההאשים
         return find_common_ancestor_core(self.objects_dir(), commit_hash1, commit_hash2)
         
 
@@ -699,7 +694,6 @@ def tag_ref(tag: str) -> SymRef:
 def find_common_ancestor_core(objects_dir: str, hash1: str, hash2: str) -> HashRef | None:
     """Helper function to run the ancestor search algorithm independent of the Repository class."""
     try:
-        # לולאה ראשונה - איסוף אבות קדמונים של קומיט 1
         ancestors: set[HashRef] = set()
         current_hash = hash1
         while current_hash:
@@ -708,7 +702,6 @@ def find_common_ancestor_core(objects_dir: str, hash1: str, hash2: str) -> HashR
             parent = commit.parent
             current_hash = HashRef(parent) if parent else parent
 
-        # לולאה שנייה - בדיקת חיתוך עם קומיט 2
         current_hash2 = hash2
         while current_hash2:
             if current_hash2 in ancestors:

@@ -489,7 +489,9 @@ class Repository:
         save_commit(self.objects_dir(), commit)
 
         if branch:
-            self.update_ref(branch, commit_ref)
+            # Extract the relative path from the SymRef (e.g., 'heads/feature' from SymRef('heads/feature'))
+            ref_path = str(branch)
+            self.update_ref(ref_path, commit_ref)
 
         return commit_ref
 
@@ -646,6 +648,28 @@ class Repository:
 
         return top_level_diff.children
 
+    @requires_repo
+    def common_ancestor(self, commit_ref1: Ref | None = None, commit_ref2: Ref | None = None) -> HashRef | None:
+        """Find the common ancestor of two commits, if one exists."""
+        if commit_ref1 is None:
+            commit_ref1 = self.head_ref()
+        if commit_ref2 is None:
+            commit_ref2 = self.head_ref()
+
+        try:
+            commit_hash1 = self.resolve_ref(commit_ref1)
+            commit_hash2 = self.resolve_ref(commit_ref2)
+
+            if commit_hash1 is None:
+                raise RefError(f'Cannot resolve reference {commit_ref1}')
+            if commit_hash2 is None:
+                raise RefError(f'Cannot resolve reference {commit_ref2}')
+                
+        except Exception as e:
+            msg = 'Error resolving commit references'
+            raise RepositoryError(msg) from e
+
+        return find_common_ancestor_core(self.objects_dir(), commit_hash1, commit_hash2)
         
 
     def head_file(self) -> Path:
@@ -667,4 +691,27 @@ def tag_ref(tag: str) -> SymRef:
     """Create a symbolic reference for a tag name."""
     return SymRef(f'{TAGS_DIR}/{tag}')
 
+def find_common_ancestor_core(objects_dir: str, hash1: str, hash2: str) -> HashRef | None:
+    """Helper function to run the ancestor search algorithm independent of the Repository class."""
+    try:
+        ancestors: set[HashRef] = set()
+        current_hash = hash1
+        while current_hash:
+            ancestors.add(HashRef(current_hash))
+            commit = load_commit(objects_dir, current_hash)
+            parent = commit.parent
+            current_hash = HashRef(parent) if parent else parent
 
+        current_hash2 = hash2
+        while current_hash2:
+            if current_hash2 in ancestors:
+                return HashRef(current_hash2)
+            commit = load_commit(objects_dir, current_hash2)
+            parent = commit.parent
+            current_hash2 = HashRef(parent) if parent else parent
+            
+    except Exception as e:
+        msg = 'Error loading commit during ancestor search'
+        raise RepositoryError(msg) from e
+
+    return None

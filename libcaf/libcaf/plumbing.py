@@ -19,6 +19,9 @@ def hash_file(filename: str | Path) -> str:
 def hash_object(obj: Blob | Commit | Tree) -> HashRef:
     return HashRef(_libcaf.hash_object(obj))
 
+def hash_string(content: str) -> str:
+    return _libcaf.hash_string(content)
+
 def open_content_for_reading(root_dir: str | Path, hash_value: str) -> IO[bytes]:
     if isinstance(root_dir, Path):
         root_dir = str(root_dir)
@@ -86,6 +89,7 @@ __all__ = [
     'delete_content',
     'hash_file',
     'hash_object',
+    'hash_string',
     'load_commit',
     'load_tree',
     'open_content_for_reading',

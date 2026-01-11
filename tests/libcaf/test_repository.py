@@ -2,7 +2,7 @@ from pathlib import Path
 from shutil import rmtree
 
 from libcaf.constants import DEFAULT_BRANCH, HASH_LENGTH
-from libcaf.plumbing import hash_object, load_commit, load_tree
+from libcaf.plumbing import hash_object, load_commit, load_tree, open_content_for_reading
 from libcaf.ref import RefError, SymRef, write_ref
 from libcaf.repository import HashRef, Repository, RepositoryError, Tag, branch_ref
 from pytest import raises
@@ -436,6 +436,84 @@ def test_common_ancestor_no_common_root(temp_repo: Repository) -> None:
     root_b = temp_repo.commit_working_dir('Author', 'Root B')
 
     assert temp_repo.common_ancestor(root_a, root_b) is None
+
+
+def _read_blob_text(repo: Repository, blob_hash: str) -> str:
+    with open_content_for_reading(repo.objects_dir(), blob_hash) as handle:
+        return handle.read().decode('utf-8')
+
+
+def test_merge_commits_non_conflicting(temp_repo: Repository) -> None:
+    base_file = temp_repo.working_dir / 'file_a.txt'
+    base_file.write_text('base')
+    base_commit = temp_repo.commit_working_dir('Author', 'Base commit')
+
+    temp_repo.add_branch('feature')
+    temp_repo.update_ref('heads/feature', base_commit)
+    write_ref(temp_repo.head_file(), branch_ref('feature'))
+
+    feature_file = temp_repo.working_dir / 'file_b.txt'
+    feature_file.write_text('feature content')
+    feature_commit = temp_repo.commit_working_dir('Author', 'Feature commit')
+
+    feature_file.unlink()
+    write_ref(temp_repo.head_file(), branch_ref(DEFAULT_BRANCH))
+
+    base_file.write_text('main change')
+    main_commit = temp_repo.commit_working_dir('Author', 'Main commit')
+
+    merge_result = temp_repo.merge_commits(main_commit, feature_commit)
+    assert merge_result.conflicts == []
+
+    merged_tree = load_tree(temp_repo.objects_dir(), merge_result.tree_hash)
+    assert 'file_a.txt' in merged_tree.records
+    assert 'file_b.txt' in merged_tree.records
+
+    file_a_hash = merged_tree.records['file_a.txt'].hash
+    file_b_hash = merged_tree.records['file_b.txt'].hash
+    assert _read_blob_text(temp_repo, file_a_hash) == 'main change'
+    assert _read_blob_text(temp_repo, file_b_hash) == 'feature content'
+
+
+def test_merge_commits_conflict_same_file(temp_repo: Repository) -> None:
+    base_file = temp_repo.working_dir / 'file_a.txt'
+    base_file.write_text('base')
+    base_commit = temp_repo.commit_working_dir('Author', 'Base commit')
+
+    temp_repo.add_branch('feature')
+    temp_repo.update_ref('heads/feature', base_commit)
+    write_ref(temp_repo.head_file(), branch_ref('feature'))
+
+    base_file.write_text('feature change')
+    feature_commit = temp_repo.commit_working_dir('Author', 'Feature commit')
+
+    write_ref(temp_repo.head_file(), branch_ref(DEFAULT_BRANCH))
+
+    base_file.write_text('main change')
+    main_commit = temp_repo.commit_working_dir('Author', 'Main commit')
+
+    merge_result = temp_repo.merge_commits(main_commit, feature_commit)
+    assert 'file_a.txt' in merge_result.conflicts
+
+    merged_tree = load_tree(temp_repo.objects_dir(), merge_result.tree_hash)
+    merged_blob = merged_tree.records['file_a.txt'].hash
+    merged_text = _read_blob_text(temp_repo, merged_blob)
+    assert '<<<<<<<' in merged_text
+    assert '=======' in merged_text
+    assert '>>>>>>>' in merged_text
+
+
+def test_merge_commits_no_common_ancestor_raises_error(temp_repo: Repository) -> None:
+    temp_file = temp_repo.working_dir / 'test_file.txt'
+    temp_file.write_text('Root A')
+    root_a = temp_repo.commit_working_dir('Author', 'Root A')
+
+    temp_repo.head_file().write_text('')
+    temp_file.write_text('Root B')
+    root_b = temp_repo.commit_working_dir('Author', 'Root B')
+
+    with raises(RepositoryError):
+        temp_repo.merge_commits(root_a, root_b)
 
 
 def test_head_ref_missing_head_file_raises_error(temp_repo: Repository) -> None:

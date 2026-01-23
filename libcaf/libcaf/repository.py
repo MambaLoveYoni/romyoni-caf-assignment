@@ -716,10 +716,7 @@ class Repository:
             tree1 = load_tree(self.objects_dir(), commit1.tree_hash)
             tree2 = load_tree(self.objects_dir(), commit2.tree_hash)
             ancestor_tree = load_tree(self.objects_dir(), ancestor_commit.tree_hash)
-        except RepositoryErrorb as e:
-            # TODO what is repositoryErrorb??
-            msg = 'Error recieved repositoryErrorb'
-            raise RepositoryError(msg) from e
+
         except Exception as e:
             msg = 'Error preparing commits for merge'
             raise RepositoryError(msg) from e
@@ -868,9 +865,7 @@ def read_blob_text(objects_dir: str | Path, blob_hash: str) -> str:
     try:
         with open_content_for_reading(objects_dir, blob_hash) as handle:
             content = handle.read()
-            # TODO What is the other option beside reading all to memory at once?
         return content.decode('utf-8')
-        # TODO what is the other option beside utf-8 encoading? should we support other encodeings?
     except Exception as e:
         msg = f'Error reading blob {blob_hash}'
         raise RepositoryError(msg) from e
@@ -882,8 +877,6 @@ def save_blob_text(objects_dir: str | Path, content: str) -> HashRef:
         blob_hash = HashRef(hash_string(content))
         with open_content_for_writing(objects_dir, blob_hash) as handle:
             handle.write(content.encode('utf-8'))
-            # TODO this content may not be utf-8, can be very large as well. How big could that be? How should we support that?
-            # TODO what other types of encoding can that be?
     except Exception as e:
         msg = 'Error saving merged blob content'
         raise RepositoryError(msg) from e
@@ -1027,7 +1020,6 @@ def merge_trees_core(
     path_prefix: str,
     conflicts: list[str],
 ) -> HashRef:
-# TODO What is the issue with formatting here? should it be passed?
     """Merge trees recursively and return the merged tree hash."""
     merged_records: dict[str, TreeRecord] = {}
     base_records = base_tree.records if base_tree else {}
@@ -1038,15 +1030,13 @@ def merge_trees_core(
         base_record = base_records[name]
         our_record = ours_records[name]
         theirs_record = theirs_records[name]
-        # TODO remove all get
+
         path = f'{path_prefix}/{name}' if path_prefix else name
-        # TODO there are alot of assumptions for the structure of the path, does it relate to platform?
-        # TODO what other structure could there be? does it relates to the OS?
+
 
         if records_match(ours_record, theirs_record):
             merged_records[name] = TreeRecord(ours_record.type, ours_record.hash, name)
             merged_records[name] = ours_record
-            # TODO should the assignment be for all others as well?
             continue
 
         if records_match(base_record, ours_record):
@@ -1060,7 +1050,6 @@ def merge_trees_core(
             continue
 
         if base_record is None and (ours_record is None) != (theirs_record is None):
-            # TODO Something here is abit complicated, maybe the if is too big.
             chosen = ours_record or theirs_record
             merged_records[name] = TreeRecord(chosen.type, chosen.hash, name)
             continue
@@ -1079,7 +1068,6 @@ def merge_trees_core(
             ours_subtree = load_tree(objects_dir, ours_record.hash)
             theirs_subtree = load_tree(objects_dir, theirs_record.hash)
             subtree_hash = merge_trees_core(
-                # TODO There is unboubded recursion, We should use a stack
                 objects_dir,
                 base_subtree,
                 ours_subtree,

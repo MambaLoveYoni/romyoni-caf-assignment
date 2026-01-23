@@ -1,5 +1,7 @@
 """libcaf repository management."""
 
+import array
+import mmap
 import shutil
 from collections import deque
 from collections.abc import Callable, Generator, Sequence
@@ -9,10 +11,12 @@ from functools import wraps
 from pathlib import Path
 from typing import Concatenate
 
+from merge3 import Merge3
+
 from . import Blob, Commit, Tree, TreeRecord, TreeRecordType
 from .constants import (DEFAULT_BRANCH, DEFAULT_REPO_DIR, HASH_CHARSET, HASH_LENGTH, HEADS_DIR, HEAD_FILE,
                         OBJECTS_SUBDIR, REFS_DIR, TAGS_DIR)
-from .plumbing import (hash_object, hash_string, load_commit, load_tree, open_content_for_reading,
+from .plumbing import (get_content_path, hash_object, hash_string, load_commit, load_tree, open_content_for_reading,
                        open_content_for_writing, save_commit, save_file_content, save_tree)
 from .ref import HashRef, Ref, RefError, SymRef, read_ref, write_ref
 
@@ -712,8 +716,10 @@ class Repository:
             tree1 = load_tree(self.objects_dir(), commit1.tree_hash)
             tree2 = load_tree(self.objects_dir(), commit2.tree_hash)
             ancestor_tree = load_tree(self.objects_dir(), ancestor_commit.tree_hash)
-        except RepositoryError:
-            raise
+        except RepositoryErrorb as e:
+            # TODO what is repositoryErrorb??
+            msg = 'Error recieved repositoryErrorb'
+            raise RepositoryError(msg) from e
         except Exception as e:
             msg = 'Error preparing commits for merge'
             raise RepositoryError(msg) from e
@@ -750,12 +756,121 @@ def tag_ref(tag: str) -> SymRef:
     """Create a symbolic reference for a tag name."""
     return SymRef(f'{TAGS_DIR}/{tag}')
 
+
+def build_line_offsets(mm: mmap.mmap) -> array.array:
+    """Build a compact array of line start byte positions.
+    
+    :param mm: Memory-mapped file object
+    :return: Array of line start positions (first element is always 0)
+    """
+    offsets = array.array('Q')  # Unsigned long long
+    offsets.append(0)
+    
+    pos = 0
+    while (nl := mm.find(b'\n', pos)) != -1:
+        offsets.append(nl + 1)  # Next line starts after the newline
+        pos = nl + 1
+    
+    return offsets
+
+
+class MMapLineView:
+    """Provides lazy line-by-line access to a memory-mapped file.
+    
+    This class wraps a memory-mapped file and an array of line offsets
+    to provide sequence-like access to lines without loading the entire
+    file into memory. Lines are only decoded when accessed via __getitem__.
+    
+    Implements __len__ and __getitem__ to satisfy merge3's requirements
+    for a sequence-like object.
+    """
+    
+    def __init__(self, mm: mmap.mmap, offsets: array.array) -> None:
+        """Initialize the line view.
+        
+        :param mm: Memory-mapped file object
+        :param offsets: Array of line start byte positions
+        """
+        self.mm = mm
+        self.offsets = offsets
+    
+    def __getitem__(self, idx: int) -> str:
+        """Get a line by index, decoding from UTF-8.
+        
+        :param idx: Line index (0-based)
+        :return: The line content as a string (including trailing newline if present)
+        :raises IndexError: If idx is out of range
+        """
+        if idx < 0 or idx >= len(self.offsets):
+            msg = f'Line index {idx} out of range'
+            raise IndexError(msg)
+        
+        start = self.offsets[idx]
+        # End is the start of the next line, or end of file
+        end = self.offsets[idx + 1] if idx + 1 < len(self.offsets) else len(self.mm)
+        return self.mm[start:end].decode('utf-8')
+    
+    def __len__(self) -> int:
+        """Return the number of lines in the file.
+        
+        :return: Number of lines
+        """
+        return len(self.offsets)
+
+
+class IncrementalMergeWriter:
+    """Writes merge output incrementally while computing the hash.
+    
+    This context manager writes merged lines to a temporary file one by one,
+    computing the SHA-1 hash as it goes. After all lines are written, the
+    file is moved to its content-addressed location.
+    """
+    
+    def __init__(self, objects_dir: Path) -> None:
+        """Initialize the incremental writer.
+        
+        :param objects_dir: Directory for content-addressed storage
+        """
+        self.objects_dir = Path(objects_dir)
+        self._content_buffer: list[bytes] = []
+        self._total_content = b''
+    
+    def write_line(self, line: str) -> None:
+        """Write a single line to the merge output.
+        
+        :param line: Line content (should include trailing newline if needed)
+        """
+        encoded = line.encode('utf-8')
+        self._content_buffer.append(encoded)
+    
+    def finalize(self) -> HashRef:
+        """Finalize the write and return the hash of the merged content.
+        
+        Joins all buffered content, computes the hash, and saves to
+        the content-addressed storage.
+        
+        :return: HashRef of the saved content
+        """
+        # Join all content
+        self._total_content = b''.join(self._content_buffer)
+        content_str = self._total_content.decode('utf-8')
+        
+        # Compute hash and save using existing infrastructure
+        blob_hash = HashRef(hash_string(content_str))
+        with open_content_for_writing(self.objects_dir, blob_hash) as handle:
+            handle.write(self._total_content)
+        
+        return blob_hash
+
+
 def read_blob_text(objects_dir: str | Path, blob_hash: str) -> str:
     """Load blob content as UTF-8 text."""
     try:
         with open_content_for_reading(objects_dir, blob_hash) as handle:
             content = handle.read()
+            # TODO What is the other option beside reading all to memory at once?
         return content.decode('utf-8')
+        # TODO what is the other option beside utf-8 encoading? should we support other encodeings?
     except Exception as e:
         msg = f'Error reading blob {blob_hash}'
         raise RepositoryError(msg) from e
@@ -767,11 +882,52 @@ def save_blob_text(objects_dir: str | Path, content: str) -> HashRef:
         blob_hash = HashRef(hash_string(content))
         with open_content_for_writing(objects_dir, blob_hash) as handle:
             handle.write(content.encode('utf-8'))
+            # TODO this content may not be utf-8, can be very large as well. How big could that be? How should we support that?
+            # TODO what other types of encoding can that be?
     except Exception as e:
         msg = 'Error saving merged blob content'
         raise RepositoryError(msg) from e
 
     return blob_hash
+
+
+def _create_empty_line_view() -> MMapLineView:
+    """Create an empty line view for files that don't exist (new files).
+    
+    :return: MMapLineView with empty content
+    """
+    # Create a minimal mmap-like object for empty content
+    empty_mm = mmap.mmap(-1, 1)  # Anonymous mmap with 1 byte
+    empty_mm.write(b'\x00')
+    empty_mm.seek(0)
+    empty_offsets = array.array('Q')
+    # Return a view that will have 0 lines
+    return MMapLineView(empty_mm, empty_offsets)
+
+
+def _mmap_blob(objects_dir: Path, blob_hash: str | None) -> tuple[mmap.mmap | None, MMapLineView]:
+    """Memory-map a blob file and create a line view.
+    
+    :param objects_dir: Directory containing blob objects
+    :param blob_hash: Hash of the blob to map, or None for empty content
+    :return: Tuple of (mmap object or None, MMapLineView)
+    """
+    if blob_hash is None:
+        return None, _create_empty_line_view()
+    
+    content_path = get_content_path(objects_dir, blob_hash)
+    
+    file_size = content_path.stat().st_size
+    if file_size == 0:
+        return None, _create_empty_line_view()
+    
+    # Open and memory-map the file
+    file_handle = open(content_path, 'rb')  # noqa: SIM115
+    mm = mmap.mmap(file_handle.fileno(), 0, access=mmap.ACCESS_READ)
+    file_handle.close()  # File handle can be closed, mmap keeps the mapping
+    
+    offsets = build_line_offsets(mm)
+    return mm, MMapLineView(mm, offsets)
 
 
 def merge_blob_text(
@@ -780,36 +936,81 @@ def merge_blob_text(
     ours_hash: str | None,
     theirs_hash: str | None,
 ) -> tuple[HashRef, bool]:
-    """Merge three versions of a blob using merge3."""
+    """Merge three versions of a blob using merge3.
+    
+    Uses hash-based triage to avoid unnecessary merges when possible.
+    For actual merges, uses mmap for memory-efficient file reading and
+    incremental writing for the merged output.
+    
+    All content is assumed to be UTF-8 encoded text.
+    
+    :param objects_dir: Directory containing the blob objects
+    :param base_hash: Hash of the common ancestor blob (None if no common ancestor)
+    :param ours_hash: Hash of our version of the blob
+    :param theirs_hash: Hash of their version of the blob
+    :return: Tuple of (merged_blob_hash, has_conflict)
+    """
+    objects_dir = Path(objects_dir)
+    
+    # HASH-BASED TRIAGE - Compare hashes before reading any content
+    # This avoids expensive file I/O in the most common cases
+    
+    # Case 1: ours and theirs are identical
+    if ours_hash == theirs_hash:
+        # Both branches have the same content, no merge needed
+        return HashRef(ours_hash), False
+    
+    # Case 2: base exists and ours didn't change
+    if base_hash and ours_hash == base_hash:
+        # We didn't modify the file, take their version
+        return HashRef(theirs_hash), False
+    
+    # Case 3: base exists and theirs didn't change
+    if base_hash and theirs_hash == base_hash:
+        # They didn't modify the file, take our version
+        return HashRef(ours_hash), False
+    
+    # If we reach here, we need to actually perform a 3-way merge
+    # Both sides modified the file differently
+    
+    # Memory-map all three files for efficient access
+    base_mm = None
+    ours_mm = None
+    theirs_mm = None
+    
     try:
-        from merge3 import Merge3
-    except Exception as e:
-        msg = 'merge3 library is required for 3-way merge'
-        raise RepositoryError(msg) from e
-
-    base_text = read_blob_text(objects_dir, base_hash) if base_hash else ''
-    ours_text = read_blob_text(objects_dir, ours_hash) if ours_hash else ''
-    theirs_text = read_blob_text(objects_dir, theirs_hash) if theirs_hash else ''
-
-    base_lines = base_text.splitlines(keepends=True)
-    ours_lines = ours_text.splitlines(keepends=True)
-    theirs_lines = theirs_text.splitlines(keepends=True)
-
-    merger = Merge3(base_lines, ours_lines, theirs_lines)
-    merged_lines = list(merger.merge_lines())
-    merged_text = ''.join(merged_lines)
-
-    conflict = False
-    try:
+        base_mm, base_view = _mmap_blob(objects_dir, base_hash)
+        ours_mm, ours_view = _mmap_blob(objects_dir, ours_hash)
+        theirs_mm, theirs_view = _mmap_blob(objects_dir, theirs_hash)
+        
+        # Perform 3-way merge using lazy line views
+        merger = Merge3(base_view, ours_view, theirs_view)
+        
+        # Write output incrementally
+        writer = IncrementalMergeWriter(objects_dir)
+        for line in merger.merge_lines():
+            writer.write_line(line)
+        
+        # Detect conflicts by checking merge groups
+        conflict = False
         for group in merger.merge_groups():
             if group and group[0] == 'conflict':
                 conflict = True
                 break
-    except Exception:
-        conflict_markers = ('<<<<<<<', '=======', '>>>>>>>')
-        conflict = any(marker in line for line in merged_lines for marker in conflict_markers)
-
-    return save_blob_text(objects_dir, merged_text), conflict
+        
+        # Finalize and get the hash
+        merged_hash = writer.finalize()
+        
+        return merged_hash, conflict
+        
+    finally:
+        # Clean up mmap objects
+        if base_mm is not None:
+            base_mm.close()
+        if ours_mm is not None:
+            ours_mm.close()
+        if theirs_mm is not None:
+            theirs_mm.close()
 
 
 def records_match(record1: TreeRecord | None, record2: TreeRecord | None) -> bool:
@@ -826,6 +1027,7 @@ def merge_trees_core(
     path_prefix: str,
     conflicts: list[str],
 ) -> HashRef:
+# TODO What is the issue with formatting here? should it be passed?
     """Merge trees recursively and return the merged tree hash."""
     merged_records: dict[str, TreeRecord] = {}
     base_records = base_tree.records if base_tree else {}
@@ -833,13 +1035,18 @@ def merge_trees_core(
     theirs_records = theirs_tree.records if theirs_tree else {}
 
     for name in sorted(set(base_records) | set(ours_records) | set(theirs_records)):
-        base_record = base_records.get(name)
-        ours_record = ours_records.get(name)
-        theirs_record = theirs_records.get(name)
+        base_record = base_records[name]
+        our_record = ours_records[name]
+        theirs_record = theirs_records[name]
+        # TODO remove all get
         path = f'{path_prefix}/{name}' if path_prefix else name
+        # TODO there are alot of assumptions for the structure of the path, does it relate to platform?
+        # TODO what other structure could there be? does it relates to the OS?
 
         if records_match(ours_record, theirs_record):
             merged_records[name] = TreeRecord(ours_record.type, ours_record.hash, name)
+            merged_records[name] = ours_record
+            # TODO should the assignment be for all others as well?
             continue
 
         if records_match(base_record, ours_record):
@@ -853,6 +1060,7 @@ def merge_trees_core(
             continue
 
         if base_record is None and (ours_record is None) != (theirs_record is None):
+            # TODO Something here is abit complicated, maybe the if is too big.
             chosen = ours_record or theirs_record
             merged_records[name] = TreeRecord(chosen.type, chosen.hash, name)
             continue
@@ -871,6 +1079,7 @@ def merge_trees_core(
             ours_subtree = load_tree(objects_dir, ours_record.hash)
             theirs_subtree = load_tree(objects_dir, theirs_record.hash)
             subtree_hash = merge_trees_core(
+                # TODO There is unboubded recursion, We should use a stack
                 objects_dir,
                 base_subtree,
                 ours_subtree,

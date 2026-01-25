@@ -1020,85 +1020,179 @@ def merge_trees_core(
     path_prefix: str,
     conflicts: list[str],
 ) -> HashRef:
-    """Merge trees recursively and return the merged tree hash."""
-    merged_records: dict[str, TreeRecord] = {}
+    """Merge trees iteratively using a stack to avoid unbounded recursion."""
+    # Stack contains tuples of: (base_tree, ours_tree, theirs_tree, path_prefix, pending_names, merged_records)
+    # pending_names is the sorted list of names still to process
+    # merged_records accumulates the results for this tree level
+    stack: list[tuple[Tree | None, Tree | None, Tree | None, str, list[str], dict[str, TreeRecord]]] = []
+    
+    # Cache of completed subtree hashes keyed by (base_hash, ours_hash, theirs_hash, path)
+    completed_subtrees: dict[tuple[str | None, str | None, str | None, str], HashRef] = {}
+    
+    # Initialize with the root tree
     base_records = base_tree.records if base_tree else {}
     ours_records = ours_tree.records if ours_tree else {}
     theirs_records = theirs_tree.records if theirs_tree else {}
-
-    for name in sorted(set(base_records) | set(ours_records) | set(theirs_records)):
-        base_record = base_records[name]
-        our_record = ours_records[name]
-        theirs_record = theirs_records[name]
-
-        path = f'{path_prefix}/{name}' if path_prefix else name
-
-
-        if records_match(ours_record, theirs_record):
-            merged_records[name] = TreeRecord(ours_record.type, ours_record.hash, name)
-            merged_records[name] = ours_record
+    all_names = sorted(set(base_records) | set(ours_records) | set(theirs_records))
+    
+    root_merged_records: dict[str, TreeRecord] = {}
+    stack.append((base_tree, ours_tree, theirs_tree, path_prefix, all_names, root_merged_records))
+    
+    while stack:
+        current_base, current_ours, current_theirs, current_path_prefix, pending_names, merged_records = stack.pop()
+        
+        base_records = current_base.records if current_base else {}
+        ours_records = current_ours.records if current_ours else {}
+        theirs_records = current_theirs.records if current_theirs else {}
+        
+        # Process all pending names for this tree level
+        subtree_encountered = False
+        while pending_names:
+            name = pending_names[0]
+            
+            base_record = base_records.get(name)
+            our_record = ours_records.get(name)
+            theirs_record = theirs_records.get(name)
+            
+            path = f'{current_path_prefix}/{name}' if current_path_prefix else name
+            
+            # Case 1: Both sides match - use either one
+            if records_match(our_record, theirs_record):
+                merged_records[name] = our_record
+                pending_names.pop(0)
+                continue
+            
+            # Case 2: Ours matches base - take theirs (if it exists)
+            if records_match(base_record, our_record):
+                if theirs_record is not None:
+                    merged_records[name] = TreeRecord(theirs_record.type, theirs_record.hash, name)
+                pending_names.pop(0)
+                continue
+            
+            # Case 3: Theirs matches base - take ours (if it exists)
+            if records_match(base_record, theirs_record):
+                if our_record is not None:
+                    merged_records[name] = TreeRecord(our_record.type, our_record.hash, name)
+                pending_names.pop(0)
+                continue
+            
+            # Case 4: Base is None and only one side has the record - take that side
+            if base_record is None and (our_record is None) != (theirs_record is None):
+                chosen = our_record or theirs_record
+                merged_records[name] = TreeRecord(chosen.type, chosen.hash, name)
+                pending_names.pop(0)
+                continue
+            
+            # Case 5: Both sides are trees - need to merge recursively
+            if (
+                our_record
+                and theirs_record
+                and our_record.type == TreeRecordType.TREE
+                and theirs_record.type == TreeRecordType.TREE
+            ):
+                # Create a cache key for this subtree merge
+                base_hash = base_record.hash if base_record and base_record.type == TreeRecordType.TREE else None
+                cache_key = (base_hash, our_record.hash, theirs_record.hash, path)
+                
+                # Check if we've already computed this subtree merge
+                if cache_key in completed_subtrees:
+                    merged_records[name] = TreeRecord(TreeRecordType.TREE, completed_subtrees[cache_key], name)
+                    pending_names.pop(0)
+                    continue
+                
+                # Need to process subtree - push current state back onto stack
+                stack.append((current_base, current_ours, current_theirs, current_path_prefix, pending_names, merged_records))
+                
+                # Load the subtrees
+                base_subtree = (
+                    load_tree(objects_dir, base_record.hash)
+                    if base_record and base_record.type == TreeRecordType.TREE
+                    else None
+                )
+                ours_subtree = load_tree(objects_dir, our_record.hash)
+                theirs_subtree = load_tree(objects_dir, theirs_record.hash)
+                
+                # Push subtree processing onto stack
+                subtree_names = sorted(
+                    set(base_subtree.records if base_subtree else {}) |
+                    set(ours_subtree.records if ours_subtree else {}) |
+                    set(theirs_subtree.records if theirs_subtree else {})
+                )
+                subtree_merged_records: dict[str, TreeRecord] = {}
+                stack.append((base_subtree, ours_subtree, theirs_subtree, path, subtree_names, subtree_merged_records))
+                
+                subtree_encountered = True
+                break
+            
+            # Case 6: Both sides are blobs - merge the content
+            if (
+                our_record
+                and theirs_record
+                and our_record.type == TreeRecordType.BLOB
+                and theirs_record.type == TreeRecordType.BLOB
+            ):
+                base_hash = base_record.hash if base_record and base_record.type == TreeRecordType.BLOB else None
+                merged_hash, conflict = merge_blob_text(objects_dir, base_hash, our_record.hash, theirs_record.hash)
+                if conflict:
+                    conflicts.append(path)
+                merged_records[name] = TreeRecord(TreeRecordType.BLOB, merged_hash, name)
+                pending_names.pop(0)
+                continue
+            
+            # Case 7: Conflict - choose one and mark as conflict
+            chosen = our_record or theirs_record
+            if chosen is not None:
+                merged_records[name] = TreeRecord(chosen.type, chosen.hash, name)
+            conflicts.append(path)
+            pending_names.pop(0)
+        
+        # If we encountered a subtree, continue to process it
+        if subtree_encountered:
             continue
-
-        if records_match(base_record, ours_record):
-            if theirs_record is not None:
-                merged_records[name] = TreeRecord(theirs_record.type, theirs_record.hash, name)
-            continue
-
-        if records_match(base_record, theirs_record):
-            if ours_record is not None:
-                merged_records[name] = TreeRecord(ours_record.type, ours_record.hash, name)
-            continue
-
-        if base_record is None and (ours_record is None) != (theirs_record is None):
-            chosen = ours_record or theirs_record
-            merged_records[name] = TreeRecord(chosen.type, chosen.hash, name)
-            continue
-
-        if (
-            ours_record
-            and theirs_record
-            and ours_record.type == TreeRecordType.TREE
-            and theirs_record.type == TreeRecordType.TREE
-        ):
-            base_subtree = (
-                load_tree(objects_dir, base_record.hash)
-                if base_record and base_record.type == TreeRecordType.TREE
-                else None
-            )
-            ours_subtree = load_tree(objects_dir, ours_record.hash)
-            theirs_subtree = load_tree(objects_dir, theirs_record.hash)
-            subtree_hash = merge_trees_core(
-                objects_dir,
-                base_subtree,
-                ours_subtree,
-                theirs_subtree,
-                path,
-                conflicts,
-            )
-            merged_records[name] = TreeRecord(TreeRecordType.TREE, subtree_hash, name)
-            continue
-
-        if (
-            ours_record
-            and theirs_record
-            and ours_record.type == TreeRecordType.BLOB
-            and theirs_record.type == TreeRecordType.BLOB
-        ):
-            base_hash = base_record.hash if base_record and base_record.type == TreeRecordType.BLOB else None
-            merged_hash, conflict = merge_blob_text(objects_dir, base_hash, ours_record.hash, theirs_record.hash)
-            if conflict:
-                conflicts.append(path)
-            merged_records[name] = TreeRecord(TreeRecordType.BLOB, merged_hash, name)
-            continue
-
-        chosen = ours_record or theirs_record
-        if chosen is not None:
-            merged_records[name] = TreeRecord(chosen.type, chosen.hash, name)
-        conflicts.append(path)
-
-    merged_tree = Tree(merged_records)
-    save_tree(objects_dir, merged_tree)
-    return hash_object(merged_tree)
+        
+        # All names processed for this tree level - save the merged tree
+        merged_tree = Tree(merged_records)
+        save_tree(objects_dir, merged_tree)
+        tree_hash = hash_object(merged_tree)
+        
+        # If this was a subtree, cache it and update parent
+        if stack:
+            # Pop the parent frame to update it
+            parent_base, parent_ours, parent_theirs, parent_path_prefix, parent_pending_names, parent_merged_records = stack.pop()
+            
+            # The first pending name in parent is the subtree we just processed
+            if parent_pending_names:
+                subtree_name = parent_pending_names[0]
+                
+                parent_base_records = parent_base.records if parent_base else {}
+                parent_ours_records = parent_ours.records if parent_ours else {}
+                parent_theirs_records = parent_theirs.records if parent_theirs else {}
+                
+                parent_base_record = parent_base_records.get(subtree_name)
+                parent_our_record = parent_ours_records.get(subtree_name)
+                parent_theirs_record = parent_theirs_records.get(subtree_name)
+                
+                # Cache this subtree result
+                subtree_path = f'{parent_path_prefix}/{subtree_name}' if parent_path_prefix else subtree_name
+                base_hash = parent_base_record.hash if parent_base_record and parent_base_record.type == TreeRecordType.TREE else None
+                ours_hash = parent_our_record.hash if parent_our_record else None
+                theirs_hash = parent_theirs_record.hash if parent_theirs_record else None
+                cache_key = (base_hash, ours_hash, theirs_hash, subtree_path)
+                completed_subtrees[cache_key] = tree_hash
+                
+                # Update parent's merged records
+                parent_merged_records[subtree_name] = TreeRecord(TreeRecordType.TREE, tree_hash, subtree_name)
+                parent_pending_names.pop(0)
+            
+            # Push parent back onto stack to continue processing
+            stack.append((parent_base, parent_ours, parent_theirs, parent_path_prefix, parent_pending_names, parent_merged_records))
+        else:
+            # This was the root tree - return its hash
+            return tree_hash
+    
+    # Should never reach here, but return a placeholder
+    msg = "Unexpected end of merge_trees_core"
+    raise RepositoryError(msg)
 
 def find_common_ancestor_core(objects_dir: str, hash1: str, hash2: str) -> HashRef | None:
     """Helper function to run the ancestor search algorithm independent of the Repository class."""

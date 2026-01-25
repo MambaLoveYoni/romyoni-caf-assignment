@@ -451,6 +451,7 @@ def test_merge_commits_non_conflicting(temp_repo: Repository) -> None:
     temp_repo.add_branch('feature')
     temp_repo.update_ref('heads/feature', base_commit)
     write_ref(temp_repo.head_file(), branch_ref('feature'))
+    # TODO we should use update ref. Where is another example of update ref
 
     feature_file = temp_repo.working_dir / 'file_b.txt'
     feature_file.write_text('feature content')
@@ -540,3 +541,416 @@ def test_head_commit_with_symbolic_ref_returns_hash_ref(temp_repo: Repository) -
     temp_repo.update_ref('heads/main', commit_ref)
 
     assert temp_repo.head_commit() == commit_ref
+
+
+def test_merge_blob_text_triage_identical_ours_and_theirs(temp_repo: Repository) -> None:
+    """Test hash triage when ours and theirs are identical - should skip merge."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create a blob
+    test_file = temp_repo.working_dir / 'test.txt'
+    test_file.write_text('same content')
+    blob = temp_repo.save_file_content(test_file)
+    
+    # When ours and theirs are the same, should return that hash without conflict
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(), 
+        'different_base_hash',  # Base is different
+        blob.hash,              # Ours
+        blob.hash               # Theirs (same as ours)
+    )
+    
+    assert merged_hash == blob.hash
+    assert conflict is False
+
+
+def test_merge_blob_text_triage_ours_unchanged(temp_repo: Repository) -> None:
+    """Test hash triage when ours equals base - should take theirs."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create base/ours blob
+    base_file = temp_repo.working_dir / 'base.txt'
+    base_file.write_text('base content')
+    base_blob = temp_repo.save_file_content(base_file)
+    
+    # Create theirs blob (different)
+    theirs_file = temp_repo.working_dir / 'theirs.txt'
+    theirs_file.write_text('theirs modified content')
+    theirs_blob = temp_repo.save_file_content(theirs_file)
+    
+    # When ours == base, should return theirs without merge
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(),
+        base_blob.hash,   # Base
+        base_blob.hash,   # Ours (same as base, unchanged)
+        theirs_blob.hash  # Theirs (modified)
+    )
+    
+    assert merged_hash == theirs_blob.hash
+    assert conflict is False
+
+
+def test_merge_blob_text_triage_theirs_unchanged(temp_repo: Repository) -> None:
+    """Test hash triage when theirs equals base - should take ours."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create base/theirs blob
+    base_file = temp_repo.working_dir / 'base.txt'
+    base_file.write_text('base content')
+    base_blob = temp_repo.save_file_content(base_file)
+    
+    # Create ours blob (different)
+    ours_file = temp_repo.working_dir / 'ours.txt'
+    ours_file.write_text('ours modified content')
+    ours_blob = temp_repo.save_file_content(ours_file)
+    
+    # When theirs == base, should return ours without merge
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(),
+        base_blob.hash,  # Base
+        ours_blob.hash,  # Ours (modified)
+        base_blob.hash   # Theirs (same as base, unchanged)
+    )
+    
+    assert merged_hash == ours_blob.hash
+    assert conflict is False
+
+
+def test_merge_blob_text_actual_merge_needed(temp_repo: Repository) -> None:
+    """Test that actual merge happens when all three versions differ."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create base blob
+    base_file = temp_repo.working_dir / 'base.txt'
+    base_file.write_text('line 1\nline 2\nline 3\n')
+    base_blob = temp_repo.save_file_content(base_file)
+    
+    # Create ours blob (modify line 1)
+    ours_file = temp_repo.working_dir / 'ours.txt'
+    ours_file.write_text('ours line 1\nline 2\nline 3\n')
+    ours_blob = temp_repo.save_file_content(ours_file)
+    
+    # Create theirs blob (modify line 3)
+    theirs_file = temp_repo.working_dir / 'theirs.txt'
+    theirs_file.write_text('line 1\nline 2\ntheirs line 3\n')
+    theirs_blob = temp_repo.save_file_content(theirs_file)
+    
+    # All three are different, should perform actual merge
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(),
+        base_blob.hash,
+        ours_blob.hash,
+        theirs_blob.hash
+    )
+    
+    # Should successfully merge without conflict (changes on different lines)
+    assert conflict is False
+    assert merged_hash != base_blob.hash
+    assert merged_hash != ours_blob.hash
+    assert merged_hash != theirs_blob.hash
+    
+    # Verify merged content contains both changes
+    merged_text = _read_blob_text(temp_repo, merged_hash)
+    assert 'ours line 1' in merged_text
+    assert 'theirs line 3' in merged_text
+
+
+def test_merge_blob_text_actual_merge_with_conflict(temp_repo: Repository) -> None:
+    """Test that conflicts are detected when both sides modify the same line."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create base blob
+    base_file = temp_repo.working_dir / 'base.txt'
+    base_file.write_text('line 1\n')
+    base_blob = temp_repo.save_file_content(base_file)
+    
+    # Create ours blob (modify line 1)
+    ours_file = temp_repo.working_dir / 'ours.txt'
+    ours_file.write_text('ours modification\n')
+    ours_blob = temp_repo.save_file_content(ours_file)
+    
+    # Create theirs blob (modify line 1 differently)
+    theirs_file = temp_repo.working_dir / 'theirs.txt'
+    theirs_file.write_text('theirs modification\n')
+    theirs_blob = temp_repo.save_file_content(theirs_file)
+    
+    # Conflicting changes should be detected
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(),
+        base_blob.hash,
+        ours_blob.hash,
+        theirs_blob.hash
+    )
+    
+    # Should detect conflict
+    assert conflict is True
+    
+    # Verify merged content contains conflict markers
+    merged_text = _read_blob_text(temp_repo, merged_hash)
+    assert '<<<<<<<' in merged_text
+    assert '=======' in merged_text
+    assert '>>>>>>>' in merged_text
+
+
+def test_merge_blob_text_no_base_identical_content(temp_repo: Repository) -> None:
+    """Test 2-way merge when no base exists but content is identical."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create identical content in both branches
+    content_file = temp_repo.working_dir / 'content.txt'
+    content_file.write_text('same content added in both branches')
+    blob = temp_repo.save_file_content(content_file)
+    
+    # No base, but ours and theirs are identical
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(),
+        None,       # No base (file didn't exist in common ancestor)
+        blob.hash,  # Ours
+        blob.hash   # Theirs (same)
+    )
+    
+    assert merged_hash == blob.hash
+    assert conflict is False
+
+
+def test_merge_blob_text_no_base_different_content(temp_repo: Repository) -> None:
+    """Test 2-way merge when no base exists and content differs."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create different content in both branches
+    ours_file = temp_repo.working_dir / 'ours.txt'
+    ours_file.write_text('ours added content')
+    ours_blob = temp_repo.save_file_content(ours_file)
+    
+    theirs_file = temp_repo.working_dir / 'theirs.txt'
+    theirs_file.write_text('theirs added content')
+    theirs_blob = temp_repo.save_file_content(theirs_file)
+    
+    # No base, different content
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(),
+        None,            # No base
+        ours_blob.hash,  # Ours
+        theirs_blob.hash # Theirs (different)
+    )
+    
+    # With no base and different content, merge3 treats everything as added
+    # This will create a merged result with conflict markers
+    merged_text = _read_blob_text(temp_repo, merged_hash)
+    assert '<<<<<<<' in merged_text or 'ours added content' in merged_text
+    assert 'theirs added content' in merged_text
+
+
+# Tests for mmap-based merge implementation
+
+def test_build_line_offsets(temp_repo: Repository) -> None:
+    """Test that build_line_offsets correctly identifies line start positions."""
+    import mmap
+    from libcaf.repository import build_line_offsets
+    
+    # Create a file with known line positions
+    test_file = temp_repo.working_dir / 'test_offsets.txt'
+    content = 'line1\nline2\nline3\n'
+    test_file.write_bytes(content.encode('utf-8'))
+    
+    with open(test_file, 'rb') as f:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        offsets = build_line_offsets(mm)
+        mm.close()
+    
+    # Should have 4 offsets: start of line1 (0), line2 (6), line3 (12), and after last newline (18)
+    assert len(offsets) == 4
+    assert offsets[0] == 0    # 'line1\n' starts at 0
+    assert offsets[1] == 6    # 'line2\n' starts at 6
+    assert offsets[2] == 12   # 'line3\n' starts at 12
+    assert offsets[3] == 18   # Position after last newline
+
+
+def test_build_line_offsets_no_trailing_newline(temp_repo: Repository) -> None:
+    """Test line offsets for a file without trailing newline."""
+    import mmap
+    from libcaf.repository import build_line_offsets
+    
+    test_file = temp_repo.working_dir / 'test_no_newline.txt'
+    content = 'line1\nline2'  # No trailing newline
+    test_file.write_bytes(content.encode('utf-8'))
+    
+    with open(test_file, 'rb') as f:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        offsets = build_line_offsets(mm)
+        mm.close()
+    
+    # Should have 2 offsets: start of line1 (0) and start of line2 (6)
+    assert len(offsets) == 2
+    assert offsets[0] == 0
+    assert offsets[1] == 6
+
+
+def test_mmap_line_view_access(temp_repo: Repository) -> None:
+    """Test that MMapLineView provides correct lazy line access."""
+    import mmap
+    from libcaf.repository import build_line_offsets, MMapLineView
+    
+    test_file = temp_repo.working_dir / 'test_view.txt'
+    content = 'first line\nsecond line\nthird line\n'
+    test_file.write_bytes(content.encode('utf-8'))
+    
+    with open(test_file, 'rb') as f:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        offsets = build_line_offsets(mm)
+        view = MMapLineView(mm, offsets)
+        
+        # Test length
+        assert len(view) == 4  # 3 lines plus position after last newline
+        
+        # Test individual line access
+        assert view[0] == 'first line\n'
+        assert view[1] == 'second line\n'
+        assert view[2] == 'third line\n'
+        
+        mm.close()
+
+
+def test_mmap_line_view_out_of_range(temp_repo: Repository) -> None:
+    """Test that MMapLineView raises IndexError for out of range access."""
+    import mmap
+    from libcaf.repository import build_line_offsets, MMapLineView
+    
+    test_file = temp_repo.working_dir / 'test_range.txt'
+    test_file.write_bytes(b'one line\n')
+    
+    with open(test_file, 'rb') as f:
+        mm = mmap.mmap(f.fileno(), 0, access=mmap.ACCESS_READ)
+        offsets = build_line_offsets(mm)
+        view = MMapLineView(mm, offsets)
+        
+        with raises(IndexError):
+            _ = view[100]
+        
+        with raises(IndexError):
+            _ = view[-1]
+        
+        mm.close()
+
+
+def test_incremental_merge_writer(temp_repo: Repository) -> None:
+    """Test that IncrementalMergeWriter produces correct output and hash."""
+    from libcaf.repository import IncrementalMergeWriter
+    from libcaf.plumbing import hash_string
+    
+    writer = IncrementalMergeWriter(temp_repo.objects_dir())
+    
+    lines = ['line 1\n', 'line 2\n', 'line 3\n']
+    for line in lines:
+        writer.write_line(line)
+    
+    result_hash = writer.finalize()
+    
+    # Verify the hash matches what we expect
+    expected_content = ''.join(lines)
+    expected_hash = hash_string(expected_content)
+    assert result_hash == expected_hash
+    
+    # Verify the content was saved correctly
+    saved_content = _read_blob_text(temp_repo, result_hash)
+    assert saved_content == expected_content
+
+
+def test_mmap_merge_with_large_file(temp_repo: Repository) -> None:
+    """Test mmap merge works correctly with larger files."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create a base file with many lines
+    base_lines = [f'line {i}\n' for i in range(100)]
+    base_file = temp_repo.working_dir / 'large_base.txt'
+    base_file.write_text(''.join(base_lines))
+    base_blob = temp_repo.save_file_content(base_file)
+    
+    # Create ours with modification at the beginning
+    ours_lines = ['OURS CHANGE\n'] + base_lines[1:]
+    ours_file = temp_repo.working_dir / 'large_ours.txt'
+    ours_file.write_text(''.join(ours_lines))
+    ours_blob = temp_repo.save_file_content(ours_file)
+    
+    # Create theirs with modification at the end
+    theirs_lines = base_lines[:-1] + ['THEIRS CHANGE\n']
+    theirs_file = temp_repo.working_dir / 'large_theirs.txt'
+    theirs_file.write_text(''.join(theirs_lines))
+    theirs_blob = temp_repo.save_file_content(theirs_file)
+    
+    # Merge should succeed without conflict
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(),
+        base_blob.hash,
+        ours_blob.hash,
+        theirs_blob.hash
+    )
+    
+    assert conflict is False
+    
+    # Verify merged content contains both changes
+    merged_text = _read_blob_text(temp_repo, merged_hash)
+    assert 'OURS CHANGE' in merged_text
+    assert 'THEIRS CHANGE' in merged_text
+
+
+def test_mmap_merge_empty_file_ours(temp_repo: Repository) -> None:
+    """Test mmap merge when our version is empty."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create base with content
+    base_file = temp_repo.working_dir / 'base.txt'
+    base_file.write_text('base content\n')
+    base_blob = temp_repo.save_file_content(base_file)
+    
+    # Create empty file for ours
+    ours_file = temp_repo.working_dir / 'ours_empty.txt'
+    ours_file.write_text('')
+    ours_blob = temp_repo.save_file_content(ours_file)
+    
+    # Theirs has same content as base
+    # This should take our version (the deletion) since theirs == base
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(),
+        base_blob.hash,
+        ours_blob.hash,
+        base_blob.hash  # theirs same as base
+    )
+    
+    # Our empty file should be chosen since theirs didn't change
+    assert conflict is False
+    assert merged_hash == ours_blob.hash
+
+
+def test_mmap_merge_utf8_content(temp_repo: Repository) -> None:
+    """Test mmap merge handles UTF-8 content correctly."""
+    from libcaf.repository import merge_blob_text
+    
+    # Create files with UTF-8 content
+    base_file = temp_repo.working_dir / 'utf8_base.txt'
+    base_file.write_text('Hello 世界\nBonjour 🌍\n', encoding='utf-8')
+    base_blob = temp_repo.save_file_content(base_file)
+    
+    # Ours modifies first line
+    ours_file = temp_repo.working_dir / 'utf8_ours.txt'
+    ours_file.write_text('Hola 世界\nBonjour 🌍\n', encoding='utf-8')
+    ours_blob = temp_repo.save_file_content(ours_file)
+    
+    # Theirs modifies second line
+    theirs_file = temp_repo.working_dir / 'utf8_theirs.txt'
+    theirs_file.write_text('Hello 世界\nCiao 🌍\n', encoding='utf-8')
+    theirs_blob = temp_repo.save_file_content(theirs_file)
+    
+    # Should merge without conflict (different lines modified)
+    merged_hash, conflict = merge_blob_text(
+        temp_repo.objects_dir(),
+        base_blob.hash,
+        ours_blob.hash,
+        theirs_blob.hash
+    )
+    
+    assert conflict is False
+    
+    merged_text = _read_blob_text(temp_repo, merged_hash)
+    assert 'Hola 世界' in merged_text
+    assert 'Ciao 🌍' in merged_text

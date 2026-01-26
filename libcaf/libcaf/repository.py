@@ -2,6 +2,7 @@
 
 import array
 import mmap
+import os
 import shutil
 from collections import deque
 from collections.abc import Callable, Generator, Sequence
@@ -815,51 +816,6 @@ class MMapLineView:
         return len(self.offsets)
 
 
-class IncrementalMergeWriter:
-    """Writes merge output incrementally while computing the hash.
-    
-    This context manager writes merged lines to a temporary file one by one,
-    computing the SHA-1 hash as it goes. After all lines are written, the
-    file is moved to its content-addressed location.
-    """
-    
-    def __init__(self, objects_dir: Path) -> None:
-        """Initialize the incremental writer.
-        
-        :param objects_dir: Directory for content-addressed storage
-        """
-        self.objects_dir = Path(objects_dir)
-        self._content_buffer: list[bytes] = []
-        self._total_content = b''
-    
-    def write_line(self, line: str) -> None:
-        """Write a single line to the merge output.
-        
-        :param line: Line content (should include trailing newline if needed)
-        """
-        encoded = line.encode('utf-8')
-        self._content_buffer.append(encoded)
-    
-    def finalize(self) -> HashRef:
-        """Finalize the write and return the hash of the merged content.
-        
-        Joins all buffered content, computes the hash, and saves to
-        the content-addressed storage.
-        
-        :return: HashRef of the saved content
-        """
-        # Join all content
-        self._total_content = b''.join(self._content_buffer)
-        content_str = self._total_content.decode('utf-8')
-        
-        # Compute hash and save using existing infrastructure
-        blob_hash = HashRef(hash_string(content_str))
-        with open_content_for_writing(self.objects_dir, blob_hash) as handle:
-            handle.write(self._total_content)
-        
-        return blob_hash
-
-
 def read_blob_text(objects_dir: str | Path, blob_hash: str) -> str:
     """Load blob content as UTF-8 text."""
     try:
@@ -908,14 +864,13 @@ def _mmap_blob(objects_dir: Path, blob_hash: str | None) -> tuple[mmap.mmap | No
     if blob_hash is None:
         return None, _create_empty_line_view()
     
-    content_path = get_content_path(objects_dir, blob_hash)
-    
-    file_size = content_path.stat().st_size
+    file_handle = open_content_for_reading(objects_dir, blob_hash)
+    file_size = os.fstat(file_handle.fileno()).st_size
     if file_size == 0:
+        file_handle.close()
         return None, _create_empty_line_view()
     
     # Open and memory-map the file
-    file_handle = open(content_path, 'rb')  # noqa: SIM115
     mm = mmap.mmap(file_handle.fileno(), 0, access=mmap.ACCESS_READ)
     file_handle.close()  # File handle can be closed, mmap keeps the mapping
     
@@ -924,7 +879,7 @@ def _mmap_blob(objects_dir: Path, blob_hash: str | None) -> tuple[mmap.mmap | No
 
 
 def merge_blob_text(
-    objects_dir: str | Path,
+    objects_dir: Path,
     base_hash: str | None,
     ours_hash: str | None,
     theirs_hash: str | None,
@@ -943,7 +898,6 @@ def merge_blob_text(
     :param theirs_hash: Hash of their version of the blob
     :return: Tuple of (merged_blob_hash, has_conflict)
     """
-    objects_dir = Path(objects_dir)
     
     # HASH-BASED TRIAGE - Compare hashes before reading any content
     # This avoids expensive file I/O in the most common cases
@@ -979,20 +933,56 @@ def merge_blob_text(
         # Perform 3-way merge using lazy line views
         merger = Merge3(base_view, ours_view, theirs_view)
         
-        # Write output incrementally
-        writer = IncrementalMergeWriter(objects_dir)
-        for line in merger.merge_lines():
-            writer.write_line(line)
-        
-        # Detect conflicts by checking merge groups
+        content_buffer: list[bytes] = []
         conflict = False
         for group in merger.merge_groups():
-            if group and group[0] == 'conflict':
+            if not group:
+                continue
+            
+            group_type = group[0]
+            
+            if group_type == 'unchanged':
+                # Lines unchanged from base - output them
+                _, base_start, base_end, _, _, _, _ = group
+                for i in range(base_start, base_end):
+                    content_buffer.append(base_view[i].encode('utf-8'))
+            
+            elif group_type == 'same':
+                # Lines changed but both sides made the same change
+                _, _, _, a_start, a_end, _, _ = group
+                for i in range(a_start, a_end):
+                    content_buffer.append(ours_view[i].encode('utf-8'))
+            
+            elif group_type == 'a':
+                # Only 'ours' side changed
+                _, _, _, a_start, a_end, _, _ = group
+                for i in range(a_start, a_end):
+                    content_buffer.append(ours_view[i].encode('utf-8'))
+            
+            elif group_type == 'b':
+                # Only 'theirs' side changed
+                _, _, _, _, _, b_start, b_end = group
+                for i in range(b_start, b_end):
+                    content_buffer.append(theirs_view[i].encode('utf-8'))
+            
+            elif group_type == 'conflict':
+                # Both sides changed differently - mark conflict and output both versions
                 conflict = True
-                break
+                _, _, _, a_start, a_end, b_start, b_end = group
+                
+                content_buffer.append(b'<<<<<<< ours\n')
+                for i in range(a_start, a_end):
+                    content_buffer.append(ours_view[i].encode('utf-8'))
+                content_buffer.append(b'=======\n')
+                for i in range(b_start, b_end):
+                    content_buffer.append(theirs_view[i].encode('utf-8'))
+                content_buffer.append(b'>>>>>>> theirs\n')
         
         # Finalize and get the hash
-        merged_hash = writer.finalize()
+        content_bytes = b''.join(content_buffer)
+        merged_hash = HashRef(hash_string(content_bytes))
+        with open_content_for_writing(objects_dir, merged_hash) as handle:
+            handle.write(content_bytes)
         
         return merged_hash, conflict
         
@@ -1013,7 +1003,7 @@ def records_match(record1: TreeRecord | None, record2: TreeRecord | None) -> boo
 
 
 def merge_trees_core(
-    objects_dir: str | Path,
+    objects_dir: Path,
     base_tree: Tree | None,
     ours_tree: Tree | None,
     theirs_tree: Tree | None,
@@ -1077,7 +1067,8 @@ def merge_trees_core(
                 continue
             
             # Case 4: Base is None and only one side has the record - take that side
-            if base_record is None and (our_record is None) != (theirs_record is None):
+            exactly_one_side_added = (our_record is None) != (theirs_record is None)
+            if base_record is None and exactly_one_side_added:
                 chosen = our_record or theirs_record
                 merged_records[name] = TreeRecord(chosen.type, chosen.hash, name)
                 pending_names.pop(0)

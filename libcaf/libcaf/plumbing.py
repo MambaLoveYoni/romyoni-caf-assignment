@@ -19,6 +19,9 @@ def hash_file(filename: str | Path) -> str:
 def hash_object(obj: Blob | Commit | Tree) -> HashRef:
     return HashRef(_libcaf.hash_object(obj))
 
+def hash_string(content: str) -> str:
+    return _libcaf.hash_string(content)
+
 def open_content_for_reading(root_dir: str | Path, hash_value: str) -> IO[bytes]:
     if isinstance(root_dir, Path):
         root_dir = str(root_dir)
@@ -82,10 +85,30 @@ def load_tree(root_dir: str | Path, hash_value: str) -> Tree:
     return _libcaf.load_tree(root_dir, hash_value)
 
 
+def get_content_path(root_dir: str | Path, hash_value: str) -> Path:
+    """Get the file path for a content-addressed object.
+
+    :param root_dir: The root directory for content-addressed storage
+    :param hash_value: The hash of the content
+    :return: Path to the content file
+    """
+    if isinstance(root_dir, str):
+        root_dir = Path(root_dir)
+    
+    if not hash_value or len(hash_value) < 2:
+        msg = 'Invalid hash value'
+        raise ValueError(msg)
+    
+    sub_dir = hash_value[:2]
+    return root_dir / sub_dir / hash_value
+
+
 __all__ = [
     'delete_content',
+    'get_content_path',
     'hash_file',
     'hash_object',
+    'hash_string',
     'load_commit',
     'load_tree',
     'open_content_for_reading',

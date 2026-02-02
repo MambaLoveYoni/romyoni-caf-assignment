@@ -3,6 +3,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+from merge3 import Merge3
+
 from . import Tree, TreeRecord, TreeRecordType
 from .plumbing import (hash_object, hash_string, load_commit, load_tree,
                        open_content_for_reading, open_content_for_writing, save_tree)
@@ -49,15 +51,8 @@ def merge_blob_text(
     objects_dir: str | Path,
     base_hash: str | None,
     ours_hash: str | None,
-    theirs_hash: str | None,
-) -> tuple[HashRef, bool]:
+    theirs_hash: str | None) -> tuple[HashRef, bool]:
     """Merge three versions of a blob using merge3."""
-    try:
-        from merge3 import Merge3
-    except Exception as e:
-        msg = 'merge3 library is required for 3-way merge'
-        raise MergeError(msg) from e
-
     base_text = read_blob_text(objects_dir, base_hash) if base_hash else ''
     ours_text = read_blob_text(objects_dir, ours_hash) if ours_hash else ''
     theirs_text = read_blob_text(objects_dir, theirs_hash) if theirs_hash else ''
@@ -95,8 +90,7 @@ def merge_trees_core(
     ours_tree: Tree | None,
     theirs_tree: Tree | None,
     path_prefix: str,
-    conflicts: list[str],
-) -> HashRef:
+    conflicts: list[str]) -> HashRef:
     """Merge trees recursively and return the merged tree hash."""
     merged_records: dict[str, TreeRecord] = {}
     base_records = base_tree.records if base_tree else {}

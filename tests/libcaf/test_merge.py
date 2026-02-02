@@ -125,3 +125,31 @@ def test_merge_commits_no_common_ancestor_raises_error(temp_repo: Repository) ->
 
     with raises(RepositoryError):
         temp_repo.merge_commits(root_a, root_b)
+
+
+def test_merge_commits_binary_file_conflict(temp_repo: Repository) -> None:
+    binary_file = temp_repo.working_dir / 'image.bin'
+    binary_file.write_bytes(b'\x00\x01\x02\x03\x04base binary data')
+    base_commit = temp_repo.commit_working_dir('Author', 'Base commit with binary')
+
+    temp_repo.add_branch('feature')
+    temp_repo.update_ref('heads/feature', base_commit)
+    write_ref(temp_repo.head_file(), branch_ref('feature'))
+
+    binary_file.write_bytes(b'\x00\x01\x02\x03\x04feature binary data')
+    feature_commit = temp_repo.commit_working_dir('Author', 'Feature modifies binary')
+
+    write_ref(temp_repo.head_file(), branch_ref(DEFAULT_BRANCH))
+
+    binary_file.write_bytes(b'\x00\x01\x02\x03\x04main binary data')
+    main_commit = temp_repo.commit_working_dir('Author', 'Main modifies binary')
+
+    merge_result = temp_repo.merge_commits(main_commit, feature_commit)
+    assert 'image.bin' in merge_result.conflicts
+
+    merged_tree = load_tree(temp_repo.objects_dir(), merge_result.tree_hash)
+    merged_blob_hash = merged_tree.records['image.bin'].hash
+
+    with open_content_for_reading(temp_repo.objects_dir(), merged_blob_hash) as handle:
+        merged_content = handle.read()
+    assert merged_content == b'\x00\x01\x02\x03\x04main binary data'

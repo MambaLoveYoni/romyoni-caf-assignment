@@ -121,7 +121,6 @@ def merge_blob_text(
                     tmp_file.writelines(group[1])
                 elif group[0] == 'conflict':
                     conflict = True
-                    # Add conflict markers
                     tmp_file.write('<<<<<<< ours\n')
                     tmp_file.writelines(group[2])  # a_lines (ours)
                     tmp_file.write('=======\n')
@@ -167,14 +166,11 @@ def merge_blob(
     if is_binary_blob(objects_dir, ours_hash) or is_binary_blob(objects_dir, theirs_hash):
         return merge_blob_binary(objects_dir, base_hash, ours_hash, theirs_hash)
 
-    # Try text merge first, but fall back to binary merge if UTF-8 decoding fails
     try:
         return merge_blob_text(objects_dir, base_hash, ours_hash, theirs_hash)
     except MergeError as e:
-        # If the error is due to invalid UTF-8, treat as binary
         if 'not valid UTF-8' in str(e):
             return merge_blob_binary(objects_dir, base_hash, ours_hash, theirs_hash)
-        # Re-raise other types of merge errors
         raise
 
 
@@ -208,7 +204,6 @@ def merge_trees_core(
         parent_records: dict[str, TreeRecord] | None = None
         record_name: str | None = None
 
-    # Cache for completed tree merges: (base_hash, ours_hash, theirs_hash) -> result_hash
     completed: dict[tuple[str | None, str | None, str | None], HashRef] = {}
 
     def get_tree_key(base_t: Tree | None, ours_t: Tree | None, theirs_t: Tree | None) -> tuple[str | None, str | None, str | None]:
@@ -217,15 +212,13 @@ def merge_trees_core(
         theirs_h = hash_object(theirs_t) if theirs_t else None
         return (base_h, ours_h, theirs_h)
 
-    # Stack for iterative processing
     stack: deque[MergeTask] = deque()
     root_task = MergeTask(base_tree, ours_tree, theirs_tree, path_prefix)
     stack.append(root_task)
 
     while stack:
-        task = stack[-1]  # Peek at top
+        task = stack[-1]  
 
-        # Check if this tree was already completed
         tree_key = get_tree_key(task.base_tree, task.ours_tree, task.theirs_tree)
         if tree_key in completed and task.current_index == 0:
             stack.pop()
@@ -235,14 +228,12 @@ def merge_trees_core(
                 )
             continue
 
-        # Initialize names to process on first visit
         if task.current_index == 0 and not task.names_to_process:
             base_records = task.base_tree.records if task.base_tree else {}
             ours_records = task.ours_tree.records if task.ours_tree else {}
             theirs_records = task.theirs_tree.records if task.theirs_tree else {}
             task.names_to_process = sorted(set(base_records) | set(ours_records) | set(theirs_records))
 
-        # Process records one by one
         if task.current_index < len(task.names_to_process):
             name = task.names_to_process[task.current_index]
             task.current_index += 1
@@ -256,7 +247,6 @@ def merge_trees_core(
             theirs_record = theirs_records.get(name)
             path = os.path.join(task.path_prefix, name) if task.path_prefix else name
 
-            # Handle simple cases
             if records_match(ours_record, theirs_record):
                 task.merged_records[name] = ours_record
                 continue
@@ -271,7 +261,6 @@ def merge_trees_core(
                     task.merged_records[name] = ours_record
                 continue
 
-            # File added in only one branch
             if base_record is None and ours_record is not None and theirs_record is None:
                 task.merged_records[name] = ours_record
                 continue
@@ -280,7 +269,6 @@ def merge_trees_core(
                 task.merged_records[name] = theirs_record
                 continue
 
-            # Both are trees - need to merge subtrees
             if (
                 ours_record
                 and theirs_record
@@ -295,12 +283,10 @@ def merge_trees_core(
                 ours_subtree = load_tree(objects_dir, ours_record.hash)
                 theirs_subtree = load_tree(objects_dir, theirs_record.hash)
 
-                # Check if subtree already merged
                 subtree_key = get_tree_key(base_subtree, ours_subtree, theirs_subtree)
                 if subtree_key in completed:
                     task.merged_records[name] = TreeRecord(TreeRecordType.TREE, completed[subtree_key], name)
                 else:
-                    # Push subtree merge onto stack
                     subtask = MergeTask(
                         base_subtree, ours_subtree, theirs_subtree, path,
                         parent_records=task.merged_records, record_name=name
@@ -308,7 +294,6 @@ def merge_trees_core(
                     stack.append(subtask)
                 continue
 
-            # Both are blobs - merge them
             if (
                 ours_record
                 and theirs_record
@@ -322,27 +307,23 @@ def merge_trees_core(
                 task.merged_records[name] = TreeRecord(TreeRecordType.BLOB, merged_hash, name)
                 continue
 
-            # Conflict case
             chosen = ours_record or theirs_record
             if chosen is not None:
                 task.merged_records[name] = chosen
             conflicts.append(path)
 
         else:
-            # All records processed - finalize this tree
             stack.pop()
             merged_tree = Tree(task.merged_records)
             save_tree(objects_dir, merged_tree)
             tree_hash = hash_object(merged_tree)
             completed[tree_key] = tree_hash
 
-            # Update parent if this is a subtree
             if task.parent_records is not None and task.record_name is not None:
                 task.parent_records[task.record_name] = TreeRecord(
                     TreeRecordType.TREE, tree_hash, task.record_name
                 )
 
-    # Return the root tree hash
     root_key = get_tree_key(base_tree, ours_tree, theirs_tree)
     return completed[root_key]
 

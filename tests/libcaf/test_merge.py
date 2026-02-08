@@ -1,15 +1,10 @@
 from pathlib import Path
 
 from libcaf.constants import DEFAULT_BRANCH
-from libcaf.plumbing import load_tree, open_content_for_reading
+from libcaf.plumbing import load_commit, load_tree, open_content_for_reading
 from libcaf.ref import write_ref
 from libcaf.repository import Repository, RepositoryError, branch_ref
 from pytest import raises
-
-
-def _read_blob_text(repo: Repository, blob_hash: str) -> str:
-    with open_content_for_reading(repo.objects_dir(), blob_hash) as handle:
-        return handle.read().decode('utf-8')
 
 
 def test_common_ancestor_linear_history(temp_repo: Repository) -> None:
@@ -80,10 +75,10 @@ def test_merge_commits_non_conflicting(temp_repo: Repository) -> None:
     assert 'file_a.txt' in merged_tree.records
     assert 'file_b.txt' in merged_tree.records
 
-    file_a_hash = merged_tree.records['file_a.txt'].hash
-    file_b_hash = merged_tree.records['file_b.txt'].hash
-    assert _read_blob_text(temp_repo, file_a_hash) == 'main change'
-    assert _read_blob_text(temp_repo, file_b_hash) == 'feature content'
+    main_tree = load_tree(temp_repo.objects_dir(), load_commit(temp_repo.objects_dir(), main_commit).tree_hash)
+    feature_tree = load_tree(temp_repo.objects_dir(), load_commit(temp_repo.objects_dir(), feature_commit).tree_hash)
+    assert merged_tree.records['file_a.txt'].hash == main_tree.records['file_a.txt'].hash
+    assert merged_tree.records['file_b.txt'].hash == feature_tree.records['file_b.txt'].hash
 
 
 def test_merge_commits_conflict_same_file(temp_repo: Repository) -> None:
@@ -108,10 +103,16 @@ def test_merge_commits_conflict_same_file(temp_repo: Repository) -> None:
 
     merged_tree = load_tree(temp_repo.objects_dir(), merge_result.tree_hash)
     merged_blob = merged_tree.records['file_a.txt'].hash
-    merged_text = _read_blob_text(temp_repo, merged_blob)
-    assert '<<<<<<<' in merged_text
-    assert '=======' in merged_text
-    assert '>>>>>>>' in merged_text
+    with open_content_for_reading(temp_repo.objects_dir(), merged_blob) as handle:
+        merged_content = handle.read()
+    expected_conflict = (
+        b'<<<<<<< ours\n'
+        b'main change'
+        b'=======\n'
+        b'feature change'
+        b'>>>>>>> theirs\n'
+    )
+    assert merged_content == expected_conflict
 
 
 def test_merge_commits_no_common_ancestor_raises_error(temp_repo: Repository) -> None:

@@ -671,7 +671,8 @@ class Repository:
         try:
             return find_common_ancestor_core(self.objects_dir(), commit_hash1, commit_hash2)
         except MergeError as e:
-            raise RepositoryError(str(e)) from e
+            msg = 'Error finding common ancestor'
+            raise RepositoryError(msg) from e
 
     @requires_repo
     def merge_commits(self, commit_ref1: Ref | None = None, commit_ref2: Ref | None = None) -> MergeResult:
@@ -696,7 +697,8 @@ class Repository:
         try:
             return merge_commits_core(self.objects_dir(), commit_hash1, commit_hash2)
         except MergeError as e:
-            raise RepositoryError(str(e)) from e
+            msg = 'Error merging commits'
+            raise RepositoryError(msg) from e
 
 
     def head_file(self) -> Path:

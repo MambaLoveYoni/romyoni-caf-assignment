@@ -25,9 +25,9 @@ RUN ln -s /usr/bin/python3 /usr/bin/python
 # Create and activate a virtual environment
 RUN python3 -m venv /venv
 
-# Upgrade pip and install necessary Python packages in the virtual environment and for merge3
+# Upgrade pip and install necessary Python packages in the virtual environment
 RUN /venv/bin/pip install --upgrade pip && \
-    /venv/bin/pip install pytest pytest-md pytest-emoji pytest-cov coverage ruff pybind11 pybind11-stubgen setuptools scikit-build-core merge3
+    /venv/bin/pip install pytest pytest-md pytest-emoji pytest-cov coverage ruff pybind11 pybind11-stubgen setuptools scikit-build-core
 
 # Set the virtual environment as the default Python environment
 ENV PATH="/venv/bin:$PATH"

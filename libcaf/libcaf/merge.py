@@ -84,11 +84,7 @@ def save_blob_text(objects_dir: str | Path, content: str) -> HashRef:
     return blob_hash
 
 
-def merge_blob_text(
-    objects_dir: str | Path,
-    base_hash: str | None,
-    ours_hash: str | None,
-    theirs_hash: str | None) -> tuple[HashRef, bool]:
+def merge_blob_text(objects_dir: str | Path, base_hash: str | None, ours_hash: str | None, theirs_hash: str | None) -> tuple[HashRef, bool]:
     """Merge three versions of a blob using merge3."""
     base_lines = read_blob_lines(objects_dir, base_hash) if base_hash else []
     ours_lines = read_blob_lines(objects_dir, ours_hash) if ours_hash else []
@@ -123,11 +119,7 @@ def merge_blob_text(
         Path(tmp_path).unlink(missing_ok=True)
 
 
-def merge_blob_binary(
-    objects_dir: str | Path,
-    base_hash: str | None,
-    ours_hash: str | None,
-    theirs_hash: str | None) -> tuple[HashRef, bool]:
+def merge_blob_binary(objects_dir: str | Path, base_hash: str | None, ours_hash: str | None, theirs_hash: str | None) -> tuple[HashRef, bool]:
     """Merge binary blobs by selecting a version or marking as conflict."""
     if ours_hash == theirs_hash:
         return HashRef(ours_hash), False
@@ -147,11 +139,7 @@ def merge_blob_binary(
     raise MergeError(msg)
 
 
-def merge_blob(
-    objects_dir: str | Path,
-    base_hash: str | None,
-    ours_hash: str | None,
-    theirs_hash: str | None) -> tuple[HashRef, bool]:
+def merge_blob(objects_dir: str | Path, base_hash: str | None, ours_hash: str | None, theirs_hash: str | None) -> tuple[HashRef, bool]:
     """Merge two blob versions using their common ancestor."""
     if is_binary_blob(objects_dir, ours_hash) or is_binary_blob(objects_dir, theirs_hash):
         return merge_blob_binary(objects_dir, base_hash, ours_hash, theirs_hash)
@@ -164,13 +152,7 @@ def merge_blob(
         raise
 
 
-def merge_trees_core(
-    objects_dir: str | Path,
-    base_tree: Tree | None,
-    ours_tree: Tree | None,
-    theirs_tree: Tree | None,
-    path_prefix: str,
-    conflicts: list[str]) -> HashRef:
+def merge_trees_core(objects_dir: str | Path, base_tree: Tree | None, ours_tree: Tree | None, theirs_tree: Tree | None, path_prefix: str, conflicts: list[str]) -> HashRef:
     """Recursively merge three trees using 3-way merge logic."""
     base_records = base_tree.records if base_tree else {}
     ours_records = ours_tree.records if ours_tree else {}

@@ -1,4 +1,3 @@
-from pathlib import Path
 
 from libcaf.constants import DEFAULT_BRANCH
 from libcaf.plumbing import load_commit, load_tree, open_content_for_reading

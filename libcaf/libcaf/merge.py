@@ -9,8 +9,8 @@ from pathlib import Path
 from merge3 import Merge3
 
 from . import Tree, TreeRecord, TreeRecordType
-from .plumbing import (hash_object, hash_string, load_commit, load_tree,
-                       open_content_for_reading, open_content_for_writing, save_file_content, save_tree)
+from .plumbing import (hash_object, load_commit, load_tree,
+                       open_content_for_reading, save_file_content, save_tree)
 from .ref import HashRef
 
 
@@ -71,18 +71,6 @@ def read_blob_lines(objects_dir: str | Path, blob_hash: str) -> list[bytes]:
         raise MergeError(msg) from e
 
 
-def save_blob_text(objects_dir: str | Path, content: str) -> HashRef:
-    """Save UTF-8 text content as a blob and return its hash."""
-    try:
-        blob_hash = HashRef(hash_string(content))
-        with open_content_for_writing(objects_dir, blob_hash) as handle:
-            handle.write(content.encode('utf-8'))
-    except Exception as e:
-        msg = 'Error saving merged blob content'
-        raise MergeError(msg) from e
-
-    return blob_hash
-
 
 def merge_blob_text(objects_dir: str | Path, base_hash: str | None, ours_hash: str | None, theirs_hash: str | None) -> tuple[HashRef, bool]:
     """Merge three versions of a blob using merge3."""
@@ -92,27 +80,26 @@ def merge_blob_text(objects_dir: str | Path, base_hash: str | None, ours_hash: s
 
     merger = Merge3(base_lines, ours_lines, theirs_lines)
 
-    # temporary file to avoid keeping the entire result in memory
     conflict = False
-    tmp_fd, tmp_path = tempfile.mkstemp()
+
+    with tempfile.NamedTemporaryFile(mode='wb', delete=False) as tmp_file:
+        for group in merger.merge_groups():
+            if group[0] == 'unchanged':
+                tmp_file.writelines(group[1])
+            elif group[0] == 'a':
+                tmp_file.writelines(group[1])
+            elif group[0] == 'b':
+                tmp_file.writelines(group[1])
+            elif group[0] == 'conflict':
+                conflict = True
+                tmp_file.write(b'<<<<<<< ours\n')
+                tmp_file.writelines(group[2])  # a_lines (ours)
+                tmp_file.write(b'=======\n')
+                tmp_file.writelines(group[3])  # b_lines (theirs)
+                tmp_file.write(b'>>>>>>> theirs\n')
+        tmp_path = tmp_file.name
 
     try:
-        with open(tmp_fd, 'wb') as tmp_file:
-            for group in merger.merge_groups():
-                if group[0] == 'unchanged':
-                    tmp_file.writelines(group[1])
-                elif group[0] == 'a':
-                    tmp_file.writelines(group[1])
-                elif group[0] == 'b':
-                    tmp_file.writelines(group[1])
-                elif group[0] == 'conflict':
-                    conflict = True
-                    tmp_file.write(b'<<<<<<< ours\n')
-                    tmp_file.writelines(group[2])  # a_lines (ours)
-                    tmp_file.write(b'=======\n')
-                    tmp_file.writelines(group[3])  # b_lines (theirs)
-                    tmp_file.write(b'>>>>>>> theirs\n')
-
         blob = save_file_content(objects_dir, tmp_path)
         return HashRef(blob.hash), conflict
     finally:
@@ -144,12 +131,7 @@ def merge_blob(objects_dir: str | Path, base_hash: str | None, ours_hash: str | 
     if is_binary_blob(objects_dir, ours_hash) or is_binary_blob(objects_dir, theirs_hash):
         return merge_blob_binary(objects_dir, base_hash, ours_hash, theirs_hash)
 
-    try:
-        return merge_blob_text(objects_dir, base_hash, ours_hash, theirs_hash)
-    except MergeError as e:
-        if 'not valid UTF-8' in str(e):
-            return merge_blob_binary(objects_dir, base_hash, ours_hash, theirs_hash)
-        raise
+    return merge_blob_text(objects_dir, base_hash, ours_hash, theirs_hash)
 
 
 def merge_trees_core(objects_dir: str | Path, base_tree: Tree | None, ours_tree: Tree | None, theirs_tree: Tree | None, path_prefix: str, conflicts: list[str]) -> HashRef:

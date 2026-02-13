@@ -13,7 +13,7 @@ from . import Blob, Commit, Tree, TreeRecord, TreeRecordType
 from .constants import (DEFAULT_BRANCH, DEFAULT_REPO_DIR, HASH_CHARSET, HASH_LENGTH, HEADS_DIR, HEAD_FILE,
                         OBJECTS_SUBDIR, REFS_DIR, TAGS_DIR)
 from .merge import MergeError, MergeResult, find_common_ancestor_core, merge_commits_core
-from .plumbing import (hash_object, load_commit, load_tree, save_commit, save_file_content, save_tree)
+from .plumbing import hash_object, load_commit, load_tree, save_commit, save_file_content, save_tree
 from .ref import HashRef, Ref, RefError, SymRef, read_ref, write_ref
 
 

@@ -62,10 +62,19 @@ def is_binary_blob(objects_dir: str | Path, blob_hash: str | None, sample_size: 
 
 
 def read_blob_lines(objects_dir: str | Path, blob_hash: str) -> list[bytes]:
-    """Load blob content as a list of byte lines, reading incrementally."""
+    """Load blob content as a list of byte lines using mmap for lazy reading."""
     try:
         with open_content_for_reading(objects_dir, blob_hash) as handle:
-            return handle.readlines()
+            if os.fstat(handle.fileno()).st_size == 0:
+                return []
+            with mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ) as mmapped:
+                lines = []
+                while True:
+                    line = mmapped.readline()
+                    if not line:
+                        break
+                    lines.append(line)
+                return lines
     except Exception as e:
         msg = f'Error reading blob {blob_hash}'
         raise MergeError(msg) from e

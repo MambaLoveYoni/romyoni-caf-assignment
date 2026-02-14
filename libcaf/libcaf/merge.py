@@ -266,21 +266,19 @@ def merge_trees_core(objects_dir: str | Path, base_tree: Tree | None, ours_tree:
 def find_common_ancestor_core(objects_dir: str, hash1: str, hash2: str) -> HashRef | None:
     """Helper function to run the ancestor search algorithm independent of the Repository class."""
     try:
-        ancestors: set[HashRef] = set()
-        current_hash = hash1
+        ancestors: set[str] = set()
+        current_hash: str | None = hash1
         while current_hash:
-            ancestors.add(HashRef(current_hash))
+            ancestors.add(current_hash)
             commit = load_commit(objects_dir, current_hash)
-            parent = commit.parent
-            current_hash = HashRef(parent) if parent else parent
+            current_hash = commit.parent
 
-        current_hash2 = hash2
+        current_hash2: str | None = hash2
         while current_hash2:
             if current_hash2 in ancestors:
                 return HashRef(current_hash2)
             commit = load_commit(objects_dir, current_hash2)
-            parent = commit.parent
-            current_hash2 = HashRef(parent) if parent else parent
+            current_hash2 = commit.parent
 
     except Exception as e:
         msg = 'Error loading commit during ancestor search'

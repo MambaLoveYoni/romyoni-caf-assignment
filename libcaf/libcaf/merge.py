@@ -208,69 +208,52 @@ def merge_trees_core(objects_dir: str | Path, base_tree: Tree | None, ours_tree:
     merged_records: dict[str, TreeRecord] = {}
 
     for name in all_names:
-        base_record = base_records.get(name)
-        ours_record = ours_records.get(name)
-        theirs_record = theirs_records.get(name)
+        base = base_records.get(name)
+        ours = ours_records.get(name)
+        theirs = theirs_records.get(name)
         path = str(Path(path_prefix) / name) if path_prefix else name
 
-        # no conflict
-        if ours_record and theirs_record and ours_record.type == theirs_record.type and ours_record.hash == theirs_record.hash:
-            merged_records[name] = ours_record
+        if ours == theirs:
+            if ours is not None:
+                merged_records[name] = ours
             continue
 
-        # take theirs
-        if base_record and ours_record and base_record.type == ours_record.type and base_record.hash == ours_record.hash:
-            if theirs_record is not None:
-                merged_records[name] = theirs_record
+        if base == ours:
+            if theirs is not None:
+                merged_records[name] = theirs
             continue
 
-        # take ours
-        if base_record and theirs_record and base_record.type == theirs_record.type and base_record.hash == theirs_record.hash:
-            if ours_record is not None:
-                merged_records[name] = ours_record
+        if base == theirs:
+            if ours is not None:
+                merged_records[name] = ours
             continue
 
-        # only on one side
-        if base_record is None and ours_record is not None and theirs_record is None:
-            merged_records[name] = ours_record
-            continue
-
-        if base_record is None and ours_record is None and theirs_record is not None:
-            merged_records[name] = theirs_record
-            continue
-
-        # Both trees
-        if (ours_record and theirs_record
-                and ours_record.type == TreeRecordType.TREE
-                and theirs_record.type == TreeRecordType.TREE):
-            base_subtree = (
-                load_tree(objects_dir, base_record.hash)
-                if base_record and base_record.type == TreeRecordType.TREE
-                else None
-            )
+        if (ours is not None and theirs is not None
+                and ours.type == TreeRecordType.TREE
+                and theirs.type == TreeRecordType.TREE):
+            base_subtree = load_tree(objects_dir, base.hash) if (base is not None and base.type == TreeRecordType.TREE) else None
             merged_hash = merge_trees_core(
                 objects_dir,
                 base_subtree,
-                load_tree(objects_dir, ours_record.hash),
-                load_tree(objects_dir, theirs_record.hash),
+                load_tree(objects_dir, ours.hash),
+                load_tree(objects_dir, theirs.hash),
                 path,
                 conflicts,
             )
             merged_records[name] = TreeRecord(TreeRecordType.TREE, merged_hash, name)
             continue
 
-        # 3 way blob merge
-        if (ours_record and theirs_record
-                and ours_record.type == TreeRecordType.BLOB
-                and theirs_record.type == TreeRecordType.BLOB):
-            base_hash = base_record.hash if base_record and base_record.type == TreeRecordType.BLOB else None
-            merged_hash, conflict = merge_blob(objects_dir, base_hash, ours_record.hash, theirs_record.hash)
+        if (ours is not None and theirs is not None
+                and ours.type == TreeRecordType.BLOB
+                and theirs.type == TreeRecordType.BLOB):
+            base_hash = base.hash if (base is not None and base.type == TreeRecordType.BLOB) else None
+            merged_hash, conflict = merge_blob(objects_dir, base_hash, ours.hash, theirs.hash)
             if conflict:
                 conflicts.append(path)
             merged_records[name] = TreeRecord(TreeRecordType.BLOB, merged_hash, name)
             continue
 
-        chosen = ours_record or theirs_record
+        chosen = ours or theirs
         if chosen is not None:
             merged_records[name] = chosen
         conflicts.append(path)

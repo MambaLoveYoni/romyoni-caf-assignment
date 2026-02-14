@@ -211,7 +211,7 @@ def merge_trees_core(objects_dir: str | Path, base_tree: Tree | None, ours_tree:
         base_record = base_records.get(name)
         ours_record = ours_records.get(name)
         theirs_record = theirs_records.get(name)
-        path = os.path.join(path_prefix, name) if path_prefix else name
+        path = str(Path(path_prefix) / name) if path_prefix else name
 
         # no conflict
         if ours_record and theirs_record and ours_record.type == theirs_record.type and ours_record.hash == theirs_record.hash:

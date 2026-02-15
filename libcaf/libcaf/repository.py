@@ -677,6 +677,8 @@ class Repository:
     @requires_repo
     def merge_commits(self, commit_ref1: Ref | None = None, commit_ref2: Ref | None = None) -> MergeResult:
         """Perform a 3-way merge between two commits using their common ancestor."""
+        if commit_ref1 is None and commit_ref2 is None:
+            raise RepositoryError('Both commit references are None — nothing to merge')
         if commit_ref1 is None:
             commit_ref1 = self.head_ref()
         if commit_ref2 is None:

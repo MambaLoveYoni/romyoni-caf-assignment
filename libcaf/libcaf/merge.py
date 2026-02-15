@@ -146,7 +146,7 @@ def merge_blob_text(objects_dir: str | Path, base_hash: str | None, ours_hash: s
         merger = Merge3(base_lines, ours_lines, theirs_lines)
         conflict = False
 
-        with tempfile.NamedTemporaryFile(mode='wb', delete=False) as tmp_file:
+        with tempfile.NamedTemporaryFile(mode='wb') as tmp_file:
             for group in merger.merge_groups():
                 if group[0] == 'conflict':
                     conflict = True
@@ -157,13 +157,9 @@ def merge_blob_text(objects_dir: str | Path, base_hash: str | None, ours_hash: s
                     tmp_file.write(b'>>>>>>> theirs\n')
                 else:
                     tmp_file.writelines(group[1])
-            tmp_path = tmp_file.name
-
-        try:
-            blob = save_file_content(objects_dir, tmp_path)
+            tmp_file.flush()
+            blob = save_file_content(objects_dir, tmp_file.name)
             return HashRef(blob.hash), conflict
-        finally:
-            Path(tmp_path).unlink(missing_ok=True)
 
 
 def merge_blob_binary(objects_dir: str | Path, base_hash: str | None, ours_hash: str | None, theirs_hash: str | None) -> tuple[HashRef, bool]:

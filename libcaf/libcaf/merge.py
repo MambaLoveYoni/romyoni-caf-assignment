@@ -148,19 +148,15 @@ def merge_blob_text(objects_dir: str | Path, base_hash: str | None, ours_hash: s
 
         with tempfile.NamedTemporaryFile(mode='wb', delete=False) as tmp_file:
             for group in merger.merge_groups():
-                if group[0] == 'unchanged':
-                    tmp_file.writelines(group[1])
-                elif group[0] == 'a':
-                    tmp_file.writelines(group[1])
-                elif group[0] == 'b':
-                    tmp_file.writelines(group[1])
-                elif group[0] == 'conflict':
+                if group[0] == 'conflict':
                     conflict = True
                     tmp_file.write(b'<<<<<<< ours\n')
                     tmp_file.writelines(group[2])  # a_lines (ours)
                     tmp_file.write(b'=======\n')
                     tmp_file.writelines(group[3])  # b_lines (theirs)
                     tmp_file.write(b'>>>>>>> theirs\n')
+                else:
+                    tmp_file.writelines(group[1])
             tmp_path = tmp_file.name
 
         try:

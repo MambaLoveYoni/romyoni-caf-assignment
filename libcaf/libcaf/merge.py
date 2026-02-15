@@ -198,6 +198,12 @@ def merge_blob(objects_dir: str | Path, base_hash: str | None, ours_hash: str | 
     return merge_blob_text(objects_dir, base_hash, ours_hash, theirs_hash)
 
 
+def _records_equal(a: TreeRecord | None, b: TreeRecord | None) -> bool:
+    if a is None or b is None:
+        return a is b
+    return a == b
+
+
 def merge_trees_core(objects_dir: str | Path, base_tree: Tree | None, ours_tree: Tree | None, theirs_tree: Tree | None, path_prefix: str, conflicts: list[str]) -> HashRef:
     """Recursively merge three trees using 3-way merge logic."""
     base_records = base_tree.records if base_tree else {}
@@ -213,17 +219,17 @@ def merge_trees_core(objects_dir: str | Path, base_tree: Tree | None, ours_tree:
         theirs = theirs_records.get(name)
         path = str(Path(path_prefix) / name) if path_prefix else name
 
-        if ours == theirs:
+        if _records_equal(ours, theirs):
             if ours is not None:
                 merged_records[name] = ours
             continue
 
-        if base == ours:
+        if _records_equal(base, ours):
             if theirs is not None:
                 merged_records[name] = theirs
             continue
 
-        if base == theirs:
+        if _records_equal(base, theirs):
             if ours is not None:
                 merged_records[name] = ours
             continue

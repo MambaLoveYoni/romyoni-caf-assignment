@@ -8,7 +8,6 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
-from typing import IO
 
 from merge3 import Merge3
 
@@ -68,19 +67,13 @@ def is_binary_blob(objects_dir: str | Path, blob_hash: str | None, sample_size: 
 class MmapLineSequence(Sequence[bytes]):
     """List-like random-access view over the lines of a memory-mapped file."""
 
-    def __init__(self, file_obj: IO[bytes]) -> None:
-        self._mmapped = None
-        self._size = 0
+    def __init__(self, mmapped: mmap.mmap) -> None:
+        self._mmapped = mmapped
+        self._size = len(mmapped)
         self._line_offsets = array('Q')
 
-        self._size = os.fstat(file_obj.fileno()).st_size
-        if self._size > 0:
-            self._mmapped = mmap.mmap(file_obj.fileno(), 0, access=mmap.ACCESS_READ)
-
     def build_line_index(self) -> None:
-        """Scan the entire mmapped file to record the byte offset of each line start."""
-        if self._mmapped is None:
-            return
+        """Scan the entire mmapped region to record the byte offset of each line start."""
         self._line_offsets.append(0)
         search_start = 0
         while True:
@@ -105,43 +98,35 @@ class MmapLineSequence(Sequence[bytes]):
         if index < 0 or index >= line_count:
             raise IndexError('line index out of range')
 
-        if self._mmapped is None:
-            raise IndexError('line index out of range')
-
         start = self._line_offsets[index]
         end = self._line_offsets[index + 1] if index + 1 < line_count else self._size
         return self._mmapped[start:end]
 
-    def close(self) -> None:
-        if self._mmapped is not None:
-            self._mmapped.close()
-            self._mmapped = None
+def _open_line_sequence(stack: ExitStack, objects_dir: str | Path, blob_hash: str) -> MmapLineSequence | list:
+    """Open a blob from the object store and return an indexed line sequence."""
+    handle = stack.enter_context(open_content_for_reading(objects_dir, blob_hash))
+    size = os.fstat(handle.fileno()).st_size
+    if size == 0:
+        return []
+    mmapped = stack.enter_context(mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ))
+    seq = MmapLineSequence(mmapped)
+    seq.build_line_index()
+    return seq
 
-    def __enter__(self) -> 'MmapLineSequence':
-        return self
-
-    def __exit__(self, *_: object) -> None:
-        self.close()
 
 def merge_blob_text(objects_dir: str | Path, base_hash: str | None, ours_hash: str | None, theirs_hash: str | None) -> tuple[HashRef, bool]:
     """Merge three versions of a blob using merge3."""
     with ExitStack() as stack:
         if base_hash:
-            base_handle = stack.enter_context(open_content_for_reading(objects_dir, base_hash))
-            base_lines = stack.enter_context(MmapLineSequence(base_handle))
-            base_lines.build_line_index()
+            base_lines = _open_line_sequence(stack, objects_dir, base_hash)
         else:
             base_lines = []
         if ours_hash:
-            ours_handle = stack.enter_context(open_content_for_reading(objects_dir, ours_hash))
-            ours_lines = stack.enter_context(MmapLineSequence(ours_handle))
-            ours_lines.build_line_index()
+            ours_lines = _open_line_sequence(stack, objects_dir, ours_hash)
         else:
             ours_lines = []
         if theirs_hash:
-            theirs_handle = stack.enter_context(open_content_for_reading(objects_dir, theirs_hash))
-            theirs_lines = stack.enter_context(MmapLineSequence(theirs_handle))
-            theirs_lines.build_line_index()
+            theirs_lines = _open_line_sequence(stack, objects_dir, theirs_hash)
         else:
             theirs_lines = []
 

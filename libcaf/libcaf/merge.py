@@ -66,34 +66,31 @@ def is_binary_blob(objects_dir: str | Path, blob_hash: str | None, sample_size: 
 
 
 class MmapLineSequence(Sequence[bytes]):
-    """List-like random-access view over blob lines without materializing them all."""
+    """List-like random-access view over the lines of a memory-mapped file."""
 
     def __init__(self, file_obj: IO[bytes]) -> None:
         self._mmapped = None
         self._size = 0
         self._line_offsets = array('Q')
 
-        try:
-            self._size = os.fstat(file_obj.fileno()).st_size
-            if self._size == 0:
-                return
+        self._size = os.fstat(file_obj.fileno()).st_size
+        if self._size > 0:
+            self._mmapped = mmap.mmap(file_obj.fileno(), 0, access=mmap.ACCESS_READ)
 
-            mmapped = mmap.mmap(file_obj.fileno(), 0, access=mmap.ACCESS_READ)
-            self._mmapped = mmapped
-            self._line_offsets.append(0)
-            search_start = 0
-            while True:
-                newline_pos = mmapped.find(b'\n', search_start)
-                if newline_pos < 0:
-                    break
-                line_start = newline_pos + 1
-                if line_start < self._size:
-                    self._line_offsets.append(line_start)
-                search_start = line_start
-        except Exception as e:
-            self.close()
-            msg = 'Error mmapping file for line sequence'
-            raise MergeError(msg) from e
+    def build_line_index(self) -> None:
+        """Scan the entire mmapped file to record the byte offset of each line start."""
+        if self._mmapped is None:
+            return
+        self._line_offsets.append(0)
+        search_start = 0
+        while True:
+            newline_pos = self._mmapped.find(b'\n', search_start)
+            if newline_pos < 0:
+                break
+            line_start = newline_pos + 1
+            if line_start < self._size:
+                self._line_offsets.append(line_start)
+            search_start = line_start
 
     def __len__(self) -> int:
         return len(self._line_offsets)
@@ -132,16 +129,19 @@ def merge_blob_text(objects_dir: str | Path, base_hash: str | None, ours_hash: s
         if base_hash:
             base_handle = stack.enter_context(open_content_for_reading(objects_dir, base_hash))
             base_lines = stack.enter_context(MmapLineSequence(base_handle))
+            base_lines.build_line_index()
         else:
             base_lines = []
         if ours_hash:
             ours_handle = stack.enter_context(open_content_for_reading(objects_dir, ours_hash))
             ours_lines = stack.enter_context(MmapLineSequence(ours_handle))
+            ours_lines.build_line_index()
         else:
             ours_lines = []
         if theirs_hash:
             theirs_handle = stack.enter_context(open_content_for_reading(objects_dir, theirs_hash))
             theirs_lines = stack.enter_context(MmapLineSequence(theirs_handle))
+            theirs_lines.build_line_index()
         else:
             theirs_lines = []
 

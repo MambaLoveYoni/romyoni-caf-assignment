@@ -8,6 +8,7 @@ import os
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
+from typing import IO
 
 from merge3 import Merge3
 
@@ -67,25 +68,18 @@ def is_binary_blob(objects_dir: str | Path, blob_hash: str | None, sample_size: 
 class MmapLineSequence(Sequence[bytes]):
     """List-like random-access view over blob lines without materializing them all."""
 
-    def __init__(self, objects_dir: str | Path, blob_hash: str) -> None:
-        self._handle = None
+    def __init__(self, file_obj: IO[bytes]) -> None:
         self._mmapped = None
         self._size = 0
         self._line_offsets = array('Q')
 
         try:
-            handle = open_content_for_reading(objects_dir, blob_hash)
-            self._handle = handle
-            self._size = os.fstat(handle.fileno()).st_size
+            self._size = os.fstat(file_obj.fileno()).st_size
             if self._size == 0:
-                handle.close()
-                self._handle = None
                 return
 
-            mmapped = mmap.mmap(handle.fileno(), 0, access=mmap.ACCESS_READ)
+            mmapped = mmap.mmap(file_obj.fileno(), 0, access=mmap.ACCESS_READ)
             self._mmapped = mmapped
-            handle.close()
-            self._handle = None
             self._line_offsets.append(0)
             search_start = 0
             while True:
@@ -98,7 +92,7 @@ class MmapLineSequence(Sequence[bytes]):
                 search_start = line_start
         except Exception as e:
             self.close()
-            msg = f'Error reading blob {blob_hash}'
+            msg = 'Error mmapping file for line sequence'
             raise MergeError(msg) from e
 
     def __len__(self) -> int:
@@ -126,10 +120,6 @@ class MmapLineSequence(Sequence[bytes]):
             self._mmapped.close()
             self._mmapped = None
 
-        if self._handle is not None:
-            self._handle.close()
-            self._handle = None
-
     def __enter__(self) -> 'MmapLineSequence':
         return self
 
@@ -139,9 +129,21 @@ class MmapLineSequence(Sequence[bytes]):
 def merge_blob_text(objects_dir: str | Path, base_hash: str | None, ours_hash: str | None, theirs_hash: str | None) -> tuple[HashRef, bool]:
     """Merge three versions of a blob using merge3."""
     with ExitStack() as stack:
-        base_lines = stack.enter_context(MmapLineSequence(objects_dir, base_hash)) if base_hash else []
-        ours_lines = stack.enter_context(MmapLineSequence(objects_dir, ours_hash)) if ours_hash else []
-        theirs_lines = stack.enter_context(MmapLineSequence(objects_dir, theirs_hash)) if theirs_hash else []
+        if base_hash:
+            base_handle = stack.enter_context(open_content_for_reading(objects_dir, base_hash))
+            base_lines = stack.enter_context(MmapLineSequence(base_handle))
+        else:
+            base_lines = []
+        if ours_hash:
+            ours_handle = stack.enter_context(open_content_for_reading(objects_dir, ours_hash))
+            ours_lines = stack.enter_context(MmapLineSequence(ours_handle))
+        else:
+            ours_lines = []
+        if theirs_hash:
+            theirs_handle = stack.enter_context(open_content_for_reading(objects_dir, theirs_hash))
+            theirs_lines = stack.enter_context(MmapLineSequence(theirs_handle))
+        else:
+            theirs_lines = []
 
         merger = Merge3(base_lines, ours_lines, theirs_lines)
         conflict = False
